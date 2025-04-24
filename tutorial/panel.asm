@@ -10,8 +10,8 @@
 ;
 
 .ORG $0100 
-START:	IN		A,(0FFH)	; read front panel switches
-		CPL                 ; invert bits in register A
-		OUT     (0FFH),A    ; Put it on the output LEDs
-		JP		START       ; loop forever
+START:  IN       A,(0FFH)   ; read front panel switches
+        CPL                 ; invert bits in register A
+        OUT     (0FFH),A    ; Put it on the output LEDs
+        JP      START       ; loop forever
 .END

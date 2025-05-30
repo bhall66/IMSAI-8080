@@ -1,0 +1,28 @@
+xsub
+era *.sys
+era *.hex
+era *.prn
+era *.sym
+ed boot.asm
+20AFMSIZE
+11C2DI60^z
+E
+ed bios.asm
+20AFMSIZE
+11C2DI60^z
+E
+era *.bak
+asm boot
+mac bios
+ddt movcpm.com
+i60 *
+g
+save 34 cpm60.sys
+ddt cpm60.sys
+iboot.hex
+r900
+ibios.hex
+r3580
+g0
+save 34 cpm60.sys
+

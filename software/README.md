@@ -1,6 +1,6 @@
 # Software
 
-block.bas is an XYBASIC program that takes a block number (CP/M allocate disk space, 1K in size) and shows the eight track/sectors and disk image byte offsets for this block.
+block.bas is an XYBASIC program that takes a block number (CP/M allocated disk space, 1K in size) and shows the eight track/sectors and disk image byte offsets for the block.
 
 sysAddr.bas is an XYBASIC program that displays the CCP, BDOS, and BIOS function addresses for the current system.
 

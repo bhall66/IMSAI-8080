@@ -1,10 +1,10 @@
 # Software
 
-block.bas is an XYBASIC program that takes a block number (CP/M allocate disk space, 1K in size) and shows the eight track/sectors and disk image byte offsets for this block.
+block.bas is an XYBASIC program that takes a block number (CP/M allocated disk space, 1K in size) and shows the eight track/sectors and disk image byte offsets for the block.
 
-sysAddr.bas is an XYBASIC program that displays the CCP, BDOS, BIOS, and BIOS function addresses for the current system.
+sysAddr.bas is an XYBASIC program that displays the CCP, BDOS, and BIOS function addresses for the current system.
 
-sysAddr.hex is a CP/M program in Intel hex format that displays the CCP, BDOS, BIOS, and BIOS function addresses for the current system.
+sysAddr.hex is a CP/M program in Intel hex format that displays the CCP, BDOS, and BIOS function addresses for the current system.
 
 ddump.hex is a CP/M program in Intel Hex format that displays a dump of any sector on the currently selected disk.
 

@@ -30,7 +30,7 @@ start:
    JR    NZ, ok
    LD    HL, str4       ; unsuccessful conversion
    CALL  printStr  
-   RET                  ; quit
+   JP    0000           ; quit via warm boot
 
 ok:  
    LD    B, H           ; multiply age x 7 as follows:

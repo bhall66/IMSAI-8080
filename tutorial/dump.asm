@@ -34,7 +34,7 @@ d01:
    CALL  crlf           ; crlf at end of the line
    DEC   C              ; done with all lines?
    JR    NZ, d01        ; no, so go to next line
-   RET                  ; return to CP/M
+   JP    0000           ; return to CP/M via warm boot
 
 hexLine:                ; print 16 bytes as HEX characters
    LD    A, (HL)        ; get next memory byte

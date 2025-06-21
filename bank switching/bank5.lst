@@ -1,0 +1,56 @@
+0001   0000             ;
+0002   0000             ;   Title:   bank5.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   20 Jun 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   CP/M 2.2
+0007   0000             ;            TASM compiler using Z80 mnemonics (-80 option)
+0008   0000             ;
+0009   0000             ;   Descr:   Loads a payload program into High memory (C000h) 
+0010   0000             ;
+0011   0000             ;            Payload should be assembled with org of C000h
+0012   0000             ;            and amended to this code at 0200h.
+0013   0000             ;
+0014   0000             ;            Use DDT to amend this code with a 
+0015   0000             ;            payload offset of 4140h (C000+4140=0140)    
+0016   0000             
+0017   0100             .ORG    100h
+0018   0100             
+0019   0100             SOURCE   .EQU 140h      ; payload address
+0020   0100             DEST     .EQU 0C000h    ; payload destination address
+0021   0100             CODELEN  .EQU 180h      ; payload code size, in bytes
+0022   0100             
+0023   0100 21 14 01        LD   HL,st0
+0024   0103 CD 26 01        CALL printStr       ; show title   
+0025   0106             
+0026   0106             ; Now move primary code at 0200 into high memory (C000)
+0027   0106             ; and then execute it.
+0028   0106             
+0029   0106 21 40 01        LD   HL,SOURCE      ; source addr
+0030   0109 11 00 C0        LD   DE,DEST        ; destination addr
+0031   010C 01 80 01        LD   BC,CODELEN     ; code length
+0032   010F ED B0           LDIR                ; move it!
+0033   0111 C3 00 C0        JP   DEST           ; and start execution there
+0034   0114             
+0035   0114 0D 0A 57 38 st0:    .db  13,10,"W8BH HiLoader",13,10,0
+0035   0118 42 48 20 48 
+0035   011C 69 4C 6F 61 
+0035   0120 64 65 72 0D 
+0035   0124 0A 00 
+0036   0126             
+0037   0126             ;==========================================================
+0038   0126             ; printStr - Print String
+0039   0126             ;
+0040   0126             ; Prints a null-terminated string to the console
+0041   0126             ; Call with HL pointing to the string
+0042   0126             
+0043   0126             
+0044   0126             printStr:
+0045   0126 7E              LD   A, (HL)        ; get character in the string
+0046   0127 B7              OR   A              ; is it zero?
+0047   0128 C8              RET  Z              ; if it is, we are done.
+0048   0129 D3 02           OUT (2),A           ; show char on console
+0049   012B 23              INC  HL             ; move to next character
+0050   012C 18 F8           JR   printStr       ; and loop until done
+0051   012E             
+0052   012E             .ENDtasm: Number of errors = 0

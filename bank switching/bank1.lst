@@ -1,0 +1,22 @@
+0001   0000             ;
+0002   0000             ;   Title:   bank1.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   20 Jun 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   CP/M 2.2
+0007   0000             ;            TASM compiler using Z80 mnemonics (-80 option)
+0008   0000             ;
+0009   0000             ;   Descr:   First attempt at bank switching     
+0010   0000             ;            Notice that once bank #2 occupies low memory,
+0011   0000             ;            The program, located in bank #0, is no longer present.
+0012   0000             
+0013   0000             MMU     .EQU 40H
+0014   0000             
+0015   0100             .ORG    100h
+0016   0100 3E 02           LD  A, 2        ; select memory bank #2
+0017   0102 D3 40           OUT (MMU),A     ; make it so.
+0018   0104                                 ; do stuff in bank #2
+0019   0104 3E 00           LD  A, 0        ; return to bank #0  (NOPE!)
+0020   0106 D3 40           OUT (MMU),A     ; make it so.        (NOPE!)
+0021   0108 C9              RET             ; return to CP/M     (NOPE!)
+0022   0109             .ENDtasm: Number of errors = 0

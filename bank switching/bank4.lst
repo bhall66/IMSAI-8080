@@ -1,0 +1,395 @@
+0001   0000             ;
+0002   0000             ;   Title:   bank4.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   17 Jun 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   CP/M 2.2
+0007   0000             ;            TASM compiler using Z80 mnemonics (-80 option)
+0008   0000             ;
+0009   0000             ;   Descr:   Bank Switching demonstration.      
+0010   0000             ;            This code runs in common memory at C000H
+0011   0000             ;            To run it, load & run via DDT: 
+0012   0000             ;            "DDT BANK4.HEX", then "gC000" 
+0013   0000             
+0014   0000             TPA     .EQU 100H
+0015   0000             STACK   .EQU 0C800H  ; program stack
+0016   0000             SCRATCH .EQU STACK   ; scratchpad area in common memory
+0017   0000             
+0018   C000             .ORG    0C000h
+0019   C000               
+0020   C000 31 00 C8        LD   SP,STACK    ; establish local stack
+0021   C003 21 73 C0        LD   HL,st0
+0022   C006 CD 30 C1        CALL printStr    ; display program title   
+0023   C009 CD 0C C0        CALL here        ; push PC on stack
+0024   C00C             here:   
+0025   C00C E1              POP  HL          ; retrieve PC into HL
+0026   C00D CD 4B C1        CALL printHex16  ; show PC
+0027   C010             ;
+0028   C010             ;  Now try some fun bank switching stuff
+0029   C010             ;  First, put a page of 4's in bank 4 and 5's in bank 5
+0030   C010             ;
+0031   C010 3E 04           LD   A,4
+0032   C012 CD C8 C0        CALL BANKSEL     ; switch to bank 4   
+0033   C015 21 00 01        LD   HL,TPA      ; point to page
+0034   C018 3E 44           LD   A, 44h      ; and fill it with 4's
+0035   C01A CD CE C0        CALL FILL   
+0036   C01D             
+0037   C01D 3E 05           LD   A,5
+0038   C01F CD C8 C0        CALL BANKSEL     ; switch to bank 5        
+0039   C022 21 00 01        LD   HL,TPA      ; point to page
+0040   C025 3E 55           LD   A, 55h      ; and fill it with 5's
+0041   C027 CD CE C0        CALL FILL 
+0042   C02A             
+0043   C02A             ;  Now deploy a small program at the start of
+0044   C02A             ;  TPA in bank 5, to be executed later
+0045   C02A             
+0046   C02A 21 8A C0        LD   HL,SMPROG   ; point to program payload
+0047   C02D 11 00 01        LD   DE,0100h    ; dest is TPA start
+0048   C030 01 1D 00        LD   BC,PLEN     ; program length = 29 bytes
+0049   C033 ED B0           LDIR             ; copy it!
+0050   C035             
+0051   C035             ;  Now, copy memory from bank 4 to bank 7
+0052   C035             ;  Using the BANKCPY routine
+0053   C035             
+0054   C035 3E 04           LD   A,4         ; source bank 4
+0055   C037 06 07           LD   B,7         ; dest bank 7
+0056   C039 21 00 01        LD   HL,TPA      ; source addr
+0057   C03C 11 00 04        LD   DE,400h     ; dest addr
+0058   C03F CD A7 C0        CALL BANKCPY     ; copy 4/0100 to 7/0400
+0059   C042             
+0060   C042             ;  Show selected pages of memory in banks 4, 5, and 7
+0061   C042                 
+0062   C042 3E 04           LD   A,4
+0063   C044 CD C8 C0        CALL BANKSEL     ; switch to bank 4        
+0064   C047 21 00 01        LD   HL,TPA      ; point to page
+0065   C04A CD D8 C0        CALL DUMP        ; and show it
+0066   C04D             
+0067   C04D 3E 05           LD   A,5
+0068   C04F CD C8 C0        CALL BANKSEL     ; switch to bank 5        
+0069   C052 21 00 01        LD   HL,TPA      ; point to page
+0070   C055 CD D8 C0        CALL DUMP        ; and show it
+0071   C058             
+0072   C058 3E 07           LD   A,7         
+0073   C05A CD C8 C0        CALL BANKSEL     ; switch to bank 7    
+0074   C05D 21 00 04        LD   HL,400h     ; point to page
+0075   C060 CD D8 C0        CALL DUMP        ; and show it
+0076   C063             
+0077   C063             ;  Extra bonus: execute the small program in bank 5!
+0078   C063             
+0079   C063 3E 05           LD   A,5
+0080   C065 CD C8 C0        CALL BANKSEL     ; switch to bank 5
+0081   C068 CD 00 01        CALL 0100H       ; and run code in it
+0082   C06B                     
+0083   C06B             ;  restore everything back to normal
+0084   C06B             
+0085   C06B 3E 00           LD   A,0
+0086   C06D CD C8 C0        CALL BANKSEL     ; return to bank 0
+0087   C070 C3 00 00        JP   0000        ; return to CP/M via warm boot
+0088   C073             
+0089   C073 0D 0A 57 38 st0:    .db  13,10,"W8BH BankTest4, PC=",0
+0089   C077 42 48 20 42 
+0089   C07B 61 6E 6B 54 
+0089   C07F 65 73 74 34 
+0089   C083 2C 20 50 43 
+0089   C087 3D 00 
+0090   C089 00          BANK:   .db  0
+0091   C08A             
+0092   C08A             ;  support routines start here.
+0093   C08A             ;  first up is the "small program" payload
+0094   C08A             
+0095   C08A             SMPROG:             ; typical Hello World program
+0096   C08A 21 05 01        LD  HL,0105h    ; point to following message
+0097   C08D 18 10           JR  sp1         ; go to printing loop
+0098   C08F 48 65 6C 6C     .db "Hello, World!",13,10,0
+0098   C093 6F 2C 20 57 
+0098   C097 6F 72 6C 64 
+0098   C09B 21 0D 0A 00 
+0099   C09F             sp1:
+0100   C09F 7E              LD A,(HL)       ; get next char
+0101   C0A0 B7              OR  A           ; is it 0?
+0102   C0A1 C8              RET Z           ; yes: done
+0103   C0A2 D3 02           OUT (2),A       ; no: print char
+0104   C0A4 23              INC HL          ; point to next char
+0105   C0A5 18 F8           JR  sp1         ; and repeat
+0106   C0A7             
+0107   C0A7             PLEN .EQU $-SMPROG  ; calc program length
+0108   C0A7             
+0109   C0A7             ;==========================================================
+0110   C0A7             ; BANKCPY -  Copy a page of memory from one bank to another
+0111   C0A7             ;
+0112   C0A7             ; Call with: 
+0113   C0A7             ;  Reg A   = Source Bank ID
+0114   C0A7             ;  Reg HL  = Source Bank Addr
+0115   C0A7             ;  Reg B   = Destination Bank ID
+0116   C0A7             ;  Reg DE  = Destination Bank Addr
+0117   C0A7             ;
+0118   C0A7             ; On Exit:
+0119   C0A7             ;  Memory in the lower 48K address space (0000-BFFF)
+0120   C0A7             ;  will be replaced with memory from the specified bank
+0121   C0A7             
+0122   C0A7             BANKCPY:
+0123   C0A7 CD C8 C0        CALL BANKSEL     ; copy source page to scratch:   
+0124   C0AA D5              PUSH DE          ; save destination addr
+0125   C0AB C5              PUSH BC          ; save destination bank
+0126   C0AC 11 00 C8        LD   DE,SCRATCH  ; scratchpad in high memory
+0127   C0AF 01 00 01        LD   BC,0100h    ; copy one page
+0128   C0B2 ED B0           LDIR             ; copy source -> scratch
+0129   C0B4                
+0130   C0B4 C1              POP  BC          ; now copy page to destination:
+0131   C0B5 78              LD   A,B         ; get destination bank ID
+0132   C0B6 CD C8 C0        CALL BANKSEL    
+0133   C0B9 21 00 C8        LD   HL,SCRATCH  ; scratchpad in high memory
+0134   C0BC D1              POP  DE          ; get destination addr
+0135   C0BD 01 00 01        LD   BC,0100h    ; copy one page
+0136   C0C0 ED B0           LDIR             ; copy scratch -> dest
+0137   C0C2             
+0138   C0C2 3E 00           LD   A,0
+0139   C0C4 CD C8 C0        CALL BANKSEL     ; return to system bank
+0140   C0C7 C9              RET
+0141   C0C8             
+0142   C0C8             
+0143   C0C8             ;==========================================================
+0144   C0C8             ; BANKSEL -  Select Memory Bank
+0145   C0C8             ;
+0146   C0C8             ; Call with: 
+0147   C0C8             ;  Reg A  = Bank number (0-7)
+0148   C0C8             ;
+0149   C0C8             ; On Exit:
+0150   C0C8             ;  Memory of lower 48K address space (0000-BFFF)
+0151   C0C8             ;  will be swapped with memory from specified bank
+0152   C0C8             
+0153   C0C8             BANKSEL:
+0154   C0C8 32 89 C0        LD   (BANK),A    ; store current bank ID
+0155   C0CB D3 40           OUT  (40h),A     ; switch to bank
+0156   C0CD C9              RET
+0157   C0CE             
+0158   C0CE             
+0159   C0CE             ;==========================================================
+0160   C0CE             ; FILL -  Fill a page of memory  
+0161   C0CE             ;
+0162   C0CE             ; Call with: 
+0163   C0CE             ;  Reg HL pointing to the memory page
+0164   C0CE             ;  Reg A  = fill character   
+0165   C0CE             ;
+0166   C0CE             ; On Exit:  
+0167   C0CE             ;  Reg HL points to end of page
+0168   C0CE             ;  Reg DE = HL + 1
+0169   C0CE             ;  Reg BC = 0
+0170   C0CE             
+0171   C0CE             FILL:
+0172   C0CE 5D              LD   E,L
+0173   C0CF 54              LD   D,H         ; DE = HL
+0174   C0D0 13              INC  DE          ; now DE = HL+1
+0175   C0D1 77              LD   (HL),A      ; fill char 55h
+0176   C0D2 01 00 01        LD   BC,100h     ; 256 bytes filled
+0177   C0D5 ED B0           LDIR             ; fill the page
+0178   C0D7 C9              RET
+0179   C0D8             
+0180   C0D8             ;==========================================================
+0181   C0D8             ; DUMP - Show a page (256 bytes) in hexadecimal and ASCII
+0182   C0D8             ;        as 16 lines of 16 characters
+0183   C0D8             ;
+0184   C0D8             ; Call with HL pointing to the sector in memory
+0185   C0D8             ; Expects current bank ID at location "BANK"
+0186   C0D8             ;
+0187   C0D8             ; On Exit:  
+0188   C0D8             ;  Reg HL points to end of sector
+0189   C0D8             ;  Reg B, DE preserved
+0190   C0D8             
+0191   C0D8             DUMP:
+0192   C0D8 CD 39 C1       CALL  crlf           ; start a new line
+0193   C0DB 0E 10          LD    C, 16          ; print 16 lines (256 bytes total)
+0194   C0DD             d01:
+0195   C0DD 3A 89 C0       LD    A,(BANK)       ; get current bank ID
+0196   C0E0 C6 30          ADD   A,'0';         ; convert it to ASCII
+0197   C0E2 CD 2D C1       CALL  printCh        ; and show it as address prefix
+0198   C0E5 3E 3E          LD    A,'>';         ; prefix delimiter
+0199   C0E7 CD 2D C1       CALL  printCh
+0200   C0EA CD 4B C1       CALL  printHex16     ; show starting addr of this line
+0201   C0ED 3E 3A          LD    A, ':'
+0202   C0EF CD 2D C1       CALL  printCh
+0203   C0F2 3E 20          LD    A, ' '
+0204   C0F4 CD 2D C1       CALL  printCh
+0205   C0F7 E5             PUSH  HL             ; save line address
+0206   C0F8 CD 06 C1       CALL  hexLine        ; print line in hex
+0207   C0FB E1             POP   HL             ; restore line address
+0208   C0FC CD 15 C1       CALL  asciiLine      ; print line in ASCII       
+0209   C0FF CD 39 C1       CALL  crlf           ; crlf at end of the line
+0210   C102 0D             DEC   C              ; done with all lines?
+0211   C103 20 D8          JR    NZ, d01        ; no, so go to next line  
+0212   C105 C9             RET
+0213   C106             
+0214   C106             ;==========================================================
+0215   C106             ; hexLine: print a line of 16 hexadecimal characters
+0216   C106             ;          pointed to by HL.   Uses regs A,B,HL
+0217   C106             
+0218   C106             hexLine:                ; print 16 bytes as HEX characters
+0219   C106 06 10          LD    B, 16          ; put 16 bytes on each line
+0220   C108             hl1:
+0221   C108 7E             LD    A, (HL)        ; get next memory byte
+0222   C109 CD 56 C1       CALL  printHex       ; and print it
+0223   C10C 3E 20          LD    A, ' '         ; put space between bytes
+0224   C10E CD 2D C1       CALL  printCh        
+0225   C111 23             INC   HL             ; point to next byte
+0226   C112 10 F4          DJNZ  hl1            ; loop for all bytes on this line
+0227   C114 C9             RET
+0228   C115             
+0229   C115             
+0230   C115             ;==========================================================
+0231   C115             ; hexLine: print a line of 16 ASCII haracters
+0232   C115             ;          pointed to by HL.  Uses regs A,B,HL
+0233   C115             
+0234   C115             asciiLine:              ; print 16 bytes as ASCII characters
+0235   C115 06 10          LD    B, 16          ; 16 characters per line
+0236   C117             d03:
+0237   C117 7E             LD    A, (HL)        ; get next character
+0238   C118 CD 26 C1       CALL  isPrintable    ; if not printable,
+0239   C11B 30 02          JR    NC, d04
+0240   C11D 3E 2E          LD    A, '.'         ; replace with a dot '.'
+0241   C11F             d04: 
+0242   C11F CD 2D C1       CALL  printCh        ; print the character
+0243   C122 23             INC   HL             ; advance to next character
+0244   C123 10 F2          DJNZ  d03            ; and loop until done
+0245   C125 C9             RET
+0246   C126             
+0247   C126             
+0248   C126             ;=====================================================
+0249   C126             ; isPrintable -  If char in A is a printable character,
+0250   C126             ;                the carry flag is zeroed.
+0251   C126             ;                (printable values $20-$7E)
+0252   C126             ;                Carry flag set if non-printable.
+0253   C126             ;
+0254   C126             ; On Entry:
+0255   C126             ;   Reg A contains an ASCII character
+0256   C126             ;
+0257   C126             ; On Exit:
+0258   C126             ;   All registers preserved.
+0259   C126             ;   If character is printable, carry flag cleared.  
+0260   C126             
+0261   C126             isPrintable:
+0262   C126 FE 20          CP   20h             ; if control character,
+0263   C128 D8             RET  C               ; set carry & exit.
+0264   C129 FE 7E          CP   7Eh             ; if above ASCII chars,
+0265   C12B 3F             CCF                  ; set carry & exit.
+0266   C12C C9             RET                  ; printable: carry=0
+0267   C12D             
+0268   C12D             
+0269   C12D             ;==========================================================
+0270   C12D             ; printCh - Print Character  (BARE METAL VERSION)
+0271   C12D             ;
+0272   C12D             ; Prints a single character to the console.
+0273   C12D             ; Call with character in Reg A
+0274   C12D             
+0275   C12D             printCh:
+0276   C12D D3 02           OUT (2),A           ; Bare metal; no BIOS call
+0277   C12F C9              RET  
+0278   C130             
+0279   C130             
+0280   C130             ;==========================================================
+0281   C130             ; printStr - Print String
+0282   C130             ;
+0283   C130             ; Prints a null-terminated string to the console
+0284   C130             ; Call with HL pointing to the string
+0285   C130             ;
+0286   C130             ; On Exit:
+0287   C130             ;  Reg A is zero.  
+0288   C130             ;  Reg HL points to the terminating null character
+0289   C130             ;  Reg BC, DE preserved.
+0290   C130             
+0291   C130             printStr:
+0292   C130 7E              LD   A, (HL)        ; get character in the string
+0293   C131 B7              OR   A              ; is it zero?
+0294   C132 C8              RET  Z              ; if it is, we are done.
+0295   C133 CD 2D C1        CALL printCh
+0296   C136 23              INC  HL             ; move to next character
+0297   C137 18 F7           JR   printStr       ; and loop until done
+0298   C139             
+0299   C139             
+0300   C139             ;==========================================================
+0301   C139             ; crlf - Console Carriage Return/Line feed
+0302   C139             ; 
+0303   C139             ; Used to terminate current console line and start a new one
+0304   C139             ; 
+0305   C139             ; On Exit:
+0306   C139             ;  Reg A is affected
+0307   C139             ;  Reg BC, DE, HL are preserved.
+0308   C139             
+0309   C139             crlf:
+0310   C139 3E 0D           LD   A, 13
+0311   C13B CD 2D C1        CALL printCh
+0312   C13E 3E 0A           LD   A, 10
+0313   C140 CD 2D C1        CALL printCh
+0314   C143 C9              RET
+0315   C144             
+0316   C144             
+0317   C144             ;==========================================================
+0318   C144             ; printLn - Print String with carriage return
+0319   C144             ;
+0320   C144             ; Prints a null-terminated string to the console
+0321   C144             ; Call with HL pointing to the string
+0322   C144             ;
+0323   C144             ; On Exit:
+0324   C144             ;  Reg A is affected.
+0325   C144             ;  Reg HL points to the terminating null character
+0326   C144             ;  Reg BC, DE preserved.
+0327   C144             
+0328   C144             printLn:
+0329   C144 CD 30 C1        CALL printStr
+0330   C147 CD 39 C1        CALL crlf
+0331   C14A C9              RET
+0332   C14B             
+0333   C14B             
+0334   C14B             ;=====================================================
+0335   C14B             ; printHex16 -  prints value of Reg HL as four-digit 
+0336   C14B             ;               hexadecimal number.  Leading zeroes are 
+0337   C14B             ;               suppressed.
+0338   C14B             ;
+0339   C14B             ; On Entry:
+0340   C14B             ;   Reg HL contains value to be printed ($0000 - $FFFF)
+0341   C14B             ;
+0342   C14B             ; On Exit:
+0343   C14B             ;   A, BC, DE, HL preserved.
+0344   C14B             
+0345   C14B             printHex16:
+0346   C14B F5             PUSH AF
+0347   C14C 7C             LD   A, H
+0348   C14D CD 56 C1       CALL printHex        ; print upper 2 digits
+0349   C150 7D             LD   A, L
+0350   C151 CD 56 C1       CALL printHex        ; print lower 2 digits
+0351   C154 F1             POP  AF
+0352   C155 C9             RET
+0353   C156             
+0354   C156             
+0355   C156             ;=====================================================
+0356   C156             ; printHex -  prints value of Reg A as two-digit 
+0357   C156             ;             hexadecimal number.  Leading zeroes are 
+0358   C156             ;             suppressed.
+0359   C156             ;
+0360   C156             ; On Entry:
+0361   C156             ;   Reg A contains value to be printed ($00 - $FF)
+0362   C156             ;
+0363   C156             ; On Exit:
+0364   C156             ;   Reg A contains ASCII value of lower nibble
+0365   C156             ;   BC, DE, HL preserved.
+0366   C156             
+0367   C156             printHex:
+0368   C156             printHex8:
+0369   C156 F5             PUSH AF 
+0370   C157 CD 5F C1       CALL bh1             ; first char = upper nibble
+0371   C15A F1             POP  AF
+0372   C15B CD 63 C1       CALL bh2             ; second char = lower nibble
+0373   C15E C9             RET
+0374   C15F             bh1:	                  ; shift right 4 bits
+0375   C15F 1F             RRA
+0376   C160 1F             RRA
+0377   C161 1F             RRA
+0378   C162 1F             RRA
+0379   C163             bh2:	                  ; convert lower nibble to Hex
+0380   C163 F6 F0          OR	  $F0
+0381   C165 27             DAA
+0382   C166 C6 A0          ADD  A, $A0
+0383   C168 CE 40          ADC  A, $40
+0384   C16A CD 2D C1       CALL printCh         ; print the converted char
+0385   C16D C9             RET
+0386   C16E             
+0387   C16E             .ENDtasm: Number of errors = 0

@@ -1,0 +1,23 @@
+0001   0000             ;
+0002   0000             ;   Title:   bank2.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   20 Jun 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   CP/M 2.2
+0007   0000             ;            TASM compiler using Z80 mnemonics (-80 option)
+0008   0000             ;
+0009   0000             ;   Descr:   Second attempt at bank switching.     
+0010   0000             ;            Locate program in common memory instead of TPA.
+0011   0000             ;            Using DDT won't work
+0012   0000             
+0013   0000             MMU     .EQU 40H    ; MMU control port
+0014   0000             
+0015   C000             .ORG    0C000h      ; reside in nonbanked RAM
+0016   C000             
+0017   C000 3E 02           LD  A, 2        ; select memory bank #2
+0018   C002 D3 40           OUT (MMU),A     ; make it so.
+0019   C004                                 ; do stuff in bank #2
+0020   C004 3E 00           LD  A, 0        ; return to bank #0  
+0021   C006 D3 40           OUT (MMU),A     ; make it so.        
+0022   C008 C3 00 00        JP  0000        ; restart CP/M  
+0023   C00B             .ENDtasm: Number of errors = 0

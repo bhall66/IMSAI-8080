@@ -1,0 +1,116 @@
+0001   0000             ;
+0002   0000             ;   Title:   map.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   20 June 2025
+0005   0000             ;      HW:   IMSAI 8080esp by TheHighNibble
+0006   0000             ;      SW:   TASM compiler, CPM 2.2
+0007   0000             ;
+0008   0000             ;   Descr:   Displays a color ROM/RAM memory map
+0009   0000             ;
+0010   0000             
+0011   0000             
+0012   0100             .ORG 100H
+0013   0100             
+0014   0100             start:
+0015   0100 21 35 01        LD   HL, stMapper   ; "Memory Mapper..."
+0016   0103 CD 2D 01        CALL printStr      
+0017   0106 11 00 04        LD   DE, 400H       ; page size of 1K
+0018   0109 06 40           LD   B, 64          ; eval 64 pages of memory (64K)
+0019   010B 21 00 00        LD   HL, 0000       ; starting at 0000h
+0020   010E             rt01:
+0021   010E 4E              LD   C, (HL)        ; temp save memory contents
+0022   010F 3E DC           LD   A, $DC         ; use test byte $DC
+0023   0111 77              LD   (HL), A        ; try saving the byte
+0024   0112 BE              CP   (HL)           ; then read it back & compare 
+0025   0113 71              LD   (HL), C        ; restore memory contents
+0026   0114 E5              PUSH HL             ; save memory pointer
+0027   0115 28 05           JR   Z, foundRAM    ; if same, RAM was written correctly
+0028   0117             foundROM:
+0029   0117 21 07 02        LD   HL, stROM      ; ROM found, so print 'R'
+0030   011A 18 03           JR   rt03
+0031   011C             foundRAM:
+0032   011C 21 13 02        LD   HL, stRAM      ; RAM found, so print 'W'
+0033   011F             rt03:
+0034   011F CD 2D 01        CALL printStr       ; print result 
+0035   0122 E1              POP  HL             ; restore memory pointer
+0036   0123 19              ADD  HL, DE         ; point to next memory page
+0037   0124 10 E8           DJNZ rt01           ; and loop until done
+0038   0126 21 F6 01        LD   HL, stEndmap   ; finish output
+0039   0129 CD 2D 01        CALL printStr
+0040   012C C9              RET                 ; return to OS
+0041   012D             
+0042   012D             printStr:
+0043   012D 7E              LD   A, (HL)        ; get character in the string
+0044   012E B7              OR   A              ; is it zero?
+0045   012F C8              RET  Z              ; if it is, we are done.
+0046   0130 D3 02           OUT  (2),A          ; send character to console
+0047   0132 23              INC  HL             ; move to next character
+0048   0133 18 F8           JR   printStr       ; and loop until done
+0049   0135             
+0050   0135             stMapper:
+0051   0135 0D 0A           .db 13,10
+0052   0137 20 20 57 38     .db "  W8BH Memory Mapper 1.0        R=ROM, W=RAM"   ,13,10,13,10
+0052   013B 42 48 20 4D 
+0052   013F 65 6D 6F 72 
+0052   0143 79 20 4D 61 
+0052   0147 70 70 65 72 
+0052   014B 20 31 2E 30 
+0052   014F 20 20 20 20 
+0052   0153 20 20 20 20 
+0052   0157 52 3D 52 4F 
+0052   015B 4D 2C 20 57 
+0052   015F 3D 52 41 4D 
+0052   0163 0D 0A 0D 0A 
+0053   0167 7C 20 30 30     .db "| 0000111122223333444455556666777788889999AAAABBBBCCCCDDDDEEEEFFFF |",13,10
+0053   016B 30 30 31 31 
+0053   016F 31 31 32 32 
+0053   0173 32 32 33 33 
+0053   0177 33 33 34 34 
+0053   017B 34 34 35 35 
+0053   017F 35 35 36 36 
+0053   0183 36 36 37 37 
+0053   0187 37 37 38 38 
+0053   018B 38 38 39 39 
+0053   018F 39 39 41 41 
+0053   0193 41 41 42 42 
+0053   0197 42 42 43 43 
+0053   019B 43 43 44 44 
+0053   019F 44 44 45 45 
+0053   01A3 45 45 46 46 
+0053   01A7 46 46 20 7C 
+0053   01AB 0D 0A 
+0054   01AD 7C 20 30 34     .db "| 048C048C048C048C048C048C048C048C048C048C048C048C048C048C048C048C |",13,10
+0054   01B1 38 43 30 34 
+0054   01B5 38 43 30 34 
+0054   01B9 38 43 30 34 
+0054   01BD 38 43 30 34 
+0054   01C1 38 43 30 34 
+0054   01C5 38 43 30 34 
+0054   01C9 38 43 30 34 
+0054   01CD 38 43 30 34 
+0054   01D1 38 43 30 34 
+0054   01D5 38 43 30 34 
+0054   01D9 38 43 30 34 
+0054   01DD 38 43 30 34 
+0054   01E1 38 43 30 34 
+0054   01E5 38 43 30 34 
+0054   01E9 38 43 30 34 
+0054   01ED 38 43 20 7C 
+0054   01F1 0D 0A 
+0055   01F3 7C 20 00        .db "| ",0
+0056   01F6             stEndmap:
+0057   01F6 1B 5B 33 39     .db 27,"[39m",27,"[49m"," |",13,10   ; restores default FG/BG colors
+0057   01FA 6D 1B 5B 34 
+0057   01FE 39 6D 20 7C 
+0057   0202 0D 0A 
+0058   0204 0D 0A 00        .db 13,10,0
+0059   0207             stROM:
+0060   0207 1B 5B 34 31     .db 27,"[41m",27,"[97m",'R',0   ; show white 'R' on red background
+0060   020B 6D 1B 5B 39 
+0060   020F 37 6D 52 00 
+0061   0213             stRAM:
+0062   0213 1B 5B 34 34     .db 27,"[44m",27,"[97m",'W',0   ; show white 'W' on blue background
+0062   0217 6D 1B 5B 39 
+0062   021B 37 6D 57 00 
+0063   021F             
+0064   021F             .ENDtasm: Number of errors = 0

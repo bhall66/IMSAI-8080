@@ -1,0 +1,183 @@
+0001   0000             ;
+0002   0000             ;   Title:   map2.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   22 June 2025
+0005   0000             ;      HW:   IMSAI 8080esp by TheHighNibble
+0006   0000             ;      SW:   TASM compiler, CPM 2.2
+0007   0000             ;
+0008   0000             ;   Descr:   use the MPU-B control byte to configure memory
+0009   0000             ;            and display the memory map for 4 different settings
+0010   0000             ;          
+0011   0000             ;   Usage:   "DDT map2.hex", then "g8000".  System will halt. 
+0012   0000             
+0013   0000             
+0014   8000             .ORG 8000H              ; must stay in RAM
+0015   8000             MBCP    .EQU 0F3h       ; MPU-B Control Port
+0016   8000             BOOTROM .EQU 0D800H     ; bootrom address
+0017   8000             
+0018   8000             start:
+0019   8000 31 00 84        LD   SP,8400h
+0020   8003 21 85 80        LD   HL, stTitle    ; "MPU-B Control Byte Test..."
+0021   8006 CD 60 80        CALL printStr 
+0022   8009             
+0023   8009              ; now try 4 different memory configurations
+0024   8009              ; and show the map for each one.  
+0025   8009             
+0026   8009 3E 40           LD   A,40h          ; 40h: 0000 RAM, D800 ROM
+0027   800B D3 F3           OUT  (MBCP),A       ; change memory configuration
+0028   800D CD 2E 80        CALL map            ; and show it
+0029   8010             
+0030   8010 3E 80           LD   A,80h          ; 80h: 0000 ROM, D800 RAM
+0031   8012 D3 F3           OUT  (MBCP),A       ; change memory configuration
+0032   8014 CD 2E 80        CALL map            ; and show it
+0033   8017             
+0034   8017 3E C0           LD   A,0C0h         ; C0h: 0000 RAM, D800 RAM
+0035   8019 D3 F3           OUT  (MBCP),A       ; change memory configuration
+0036   801B CD 2E 80        CALL map            ; and show it
+0037   801E             
+0038   801E 3E 00           LD   A,0            ; 00h: 0000 ROM, D800 ROM
+0039   8020 D3 F3           OUT  (MBCP),A       ; change memory configuration  
+0040   8022 CD 2E 80        CALL map            ; and show it
+0041   8025                 
+0042   8025 21 62 81        LD   HL,stReboot    ; OS in memory is trashed, so...
+0043   8028 CD 60 80        CALL printStr       ; announce reboot
+0044   802B C3 00 D8        JP   BOOTROM        ; via Bootloader in ROM
+0045   802E             
+0046   802E             
+0047   802E             map:
+0048   802E F5              PUSH AF             ; temp save value in A
+0049   802F 21 4F 81        LD   HL, stPrefix   ; start output line
+0050   8032 CD 60 80        CALL printStr
+0051   8035 F1              POP  AF             ; retrieve control byte value
+0052   8036 CD 68 80        CALL printHex       ; and display it
+0053   8039 11 00 04        LD   DE, 400H       ; set memory page size = 1K
+0054   803C 06 40           LD   B, 64          ; eval 64 pages of memory (64K)
+0055   803E 21 00 00        LD   HL, 0000       ; starting at 0000h
+0056   8041             rt01:
+0057   8041 4E              LD   C, (HL)        ; temp save memory contents
+0058   8042 3E DC           LD   A, $DC         ; use test byte $DC
+0059   8044 77              LD   (HL), A        ; try saving the byte
+0060   8045 BE              CP   (HL)           ; then read it back & compare 
+0061   8046 71              LD   (HL), C        ; restore memory contents
+0062   8047 E5              PUSH HL             ; save memory pointer
+0063   8048 28 05           JR   Z, foundRAM    ; if same, RAM was written correctly
+0064   804A             foundROM:
+0065   804A 21 78 81        LD   HL, stROM      ; ROM found, so print 'R'
+0066   804D 18 03           JR   rt03
+0067   804F             foundRAM:
+0068   804F 21 84 81        LD   HL, stRAM      ; RAM found, so print 'W'
+0069   8052             rt03:
+0070   8052 CD 60 80        CALL printStr       ; print result 
+0071   8055 E1              POP  HL             ; restore memory pointer
+0072   8056 19              ADD  HL, DE         ; point to next memory page
+0073   8057 10 E8           DJNZ rt01           ; and loop until done
+0074   8059 21 53 81        LD   HL, stPostfix  ; finish output
+0075   805C CD 60 80        CALL printStr
+0076   805F C9              RET                
+0077   8060             
+0078   8060             printStr:
+0079   8060 7E              LD   A, (HL)        ; get character in the string
+0080   8061 B7              OR   A              ; is it zero?
+0081   8062 C8              RET  Z              ; if it is, we are done.
+0082   8063 D3 02           OUT  (2),A          ; send character to console
+0083   8065 23              INC  HL             ; move to next character
+0084   8066 18 F8           JR   printStr       ; and loop until done
+0085   8068             
+0086   8068             printHex:
+0087   8068 F5              PUSH AF 
+0088   8069 CD 77 80        CALL bh1            ; first char = upper nibble
+0089   806C F1              POP  AF
+0090   806D CD 7B 80        CALL bh2            ; second char = lower nibble
+0091   8070 3E 20           LD   A,' '
+0092   8072 D3 02           OUT  (2),A      
+0093   8074 D3 02           OUT  (2),A          ; add two spaces at end.   
+0094   8076 C9              RET
+0095   8077             bh1:	                ; shift right 4 bits
+0096   8077 1F              RRA
+0097   8078 1F              RRA
+0098   8079 1F              RRA
+0099   807A 1F              RRA
+0100   807B             bh2:	                ; convert lower nibble to Hex
+0101   807B F6 F0           OR	  $F0
+0102   807D 27              DAA
+0103   807E C6 A0           ADD  A, $A0
+0104   8080 CE 40           ADC  A, $40
+0105   8082 D3 02           OUT  (2),A          ; send character to console
+0106   8084 C9              RET
+0107   8085             
+0108   8085             stTitle:
+0109   8085 0D 0A           .db 13,10
+0110   8087 20 20 4D 50     .db "  MPU-B Control Byte Test        R=ROM, W=RAM"   ,13,10,13,10
+0110   808B 55 2D 42 20 
+0110   808F 43 6F 6E 74 
+0110   8093 72 6F 6C 20 
+0110   8097 42 79 74 65 
+0110   809B 20 54 65 73 
+0110   809F 74 20 20 20 
+0110   80A3 20 20 20 20 
+0110   80A7 20 52 3D 52 
+0110   80AB 4F 4D 2C 20 
+0110   80AF 57 3D 52 41 
+0110   80B3 4D 0D 0A 0D 
+0110   80B7 0A 
+0111   80B8 7C 20 20 20     .db "|      0000111122223333444455556666777788889999AAAABBBBCCCCDDDDEEEEFFFF |",13,10
+0111   80BC 20 20 20 30 
+0111   80C0 30 30 30 31 
+0111   80C4 31 31 31 32 
+0111   80C8 32 32 32 33 
+0111   80CC 33 33 33 34 
+0111   80D0 34 34 34 35 
+0111   80D4 35 35 35 36 
+0111   80D8 36 36 36 37 
+0111   80DC 37 37 37 38 
+0111   80E0 38 38 38 39 
+0111   80E4 39 39 39 41 
+0111   80E8 41 41 41 42 
+0111   80EC 42 42 42 43 
+0111   80F0 43 43 43 44 
+0111   80F4 44 44 44 45 
+0111   80F8 45 45 45 46 
+0111   80FC 46 46 46 20 
+0111   8100 7C 0D 0A 
+0112   8103 7C 20 42 59     .db "| BYTE 048C048C048C048C048C048C048C048C048C048C048C048C048C048C048C048C |",13,10,0
+0112   8107 54 45 20 30 
+0112   810B 34 38 43 30 
+0112   810F 34 38 43 30 
+0112   8113 34 38 43 30 
+0112   8117 34 38 43 30 
+0112   811B 34 38 43 30 
+0112   811F 34 38 43 30 
+0112   8123 34 38 43 30 
+0112   8127 34 38 43 30 
+0112   812B 34 38 43 30 
+0112   812F 34 38 43 30 
+0112   8133 34 38 43 30 
+0112   8137 34 38 43 30 
+0112   813B 34 38 43 30 
+0112   813F 34 38 43 30 
+0112   8143 34 38 43 30 
+0112   8147 34 38 43 20 
+0112   814B 7C 0D 0A 00 
+0113   814F             stPrefix:
+0114   814F 7C 20 20 00     .db "|  ",0
+0115   8153             stPostfix:
+0116   8153 1B 5B 33 39     .db 27,"[39m",27,"[49m"," |",13,10,0   ; restores default FG/BG colors
+0116   8157 6D 1B 5B 34 
+0116   815B 39 6D 20 7C 
+0116   815F 0D 0A 00 
+0117   8162             stReboot:
+0118   8162 0D 0A 52 65     .db 13,10,"Rebooting CP/M...",13,10,0
+0118   8166 62 6F 6F 74 
+0118   816A 69 6E 67 20 
+0118   816E 43 50 2F 4D 
+0118   8172 2E 2E 2E 0D 
+0118   8176 0A 00 
+0119   8178             stROM:
+0120   8178 1B 5B 34 31     .db 27,"[41m",27,"[97m",'R',0   ; show white 'R' on red background
+0120   817C 6D 1B 5B 39 
+0120   8180 37 6D 52 00 
+0121   8184             stRAM:
+0122   8184 1B 5B 34 34     .db 27,"[44m",27,"[97m",'W',0   ; show white 'W' on blue background
+0122   8188 6D 1B 5B 39 
+0122   818C 37 6D 57 00 
+0123   8190             .ENDtasm: Number of errors = 0

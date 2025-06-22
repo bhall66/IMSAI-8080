@@ -1,14 +1,14 @@
 ;
 ;   Title:   map4.asm
 ;  Author:   Bruce E. Hall, w8bh
-;    Date:   18 June 2025
+;    Date:   22 June 2025
 ;      HW:   IMSAI 8080esp by TheHighNibble
 ;      SW:   TASM compiler, CPM 2.2
 ;
 ;   Descr:   use the MPU-B control byte to configure memory
 ;            and display the memory map for 4 different settings
 ;          
-;   Usage:   "DDT map4.asm", then "g8000".  System will halt. 
+;   Usage:   "DDT map4.hex", then "g8000".  System will halt. 
 
 
 .ORG 8000H              ; must stay in RAM
@@ -22,10 +22,6 @@ start:
  ; now try 4 different memory configurations
  ; and show the map for each one.  
 
-    LD   A,0            ; 00h: 0000 ROM, D800 ROM
-    OUT  (MBCP),A       ; change memory configuration  
-    CALL map            ; and show it
-
     LD   A,40h          ; 40h: 0000 RAM, D800 ROM
     OUT  (MBCP),A       ; change memory configuration
     CALL map            ; and show it
@@ -38,9 +34,12 @@ start:
     OUT  (MBCP),A       ; change memory configuration
     CALL map            ; and show it
 
-    LD   HL,stHalted    
-    CALL printStr
-    HALT                ; OS trashed, need cold reset
+    LD   A,0            ; 00h: 0000 ROM, D800 ROM
+    OUT  (MBCP),A       ; change memory configuration  
+    CALL map            ; and show it
+    
+                        ; OS in memory is trashed, so...
+    JP   0D800h         ; cold boot via bootloader
 
 
 map:
@@ -71,7 +70,6 @@ rt03:
     CALL printStr
     RET                
 
-
 printStr:
     LD   A, (HL)        ; get character in the string
     OR   A              ; is it zero?
@@ -79,7 +77,6 @@ printStr:
     OUT  (2),A          ; send character to console
     INC  HL             ; move to next character
     JR   printStr       ; and loop until done
-
 
 stTitle:
     .db 13,10
@@ -94,6 +91,4 @@ stROM:
     .db 27,"[41m",27,"[97m",'R',0   ; show white 'R' on red background
 stRAM:
     .db 27,"[44m",27,"[97m",'W',0   ; show white 'W' on blue background
-stHalted:
-    .db 13,10,"System Halted.",0
 .END

@@ -1,0 +1,1436 @@
+0001   0000             ;
+0002   0000             ;   Title:   mpu-b-rom.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   04 Jul 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
+0007   0000             ;            
+0008   0000             ;   Descr:   This file represents a hand disassembly of the MPU-B-ROM.hex
+0009   0000             ;            source file, which is found on the z80pack GitHub repository.
+0010   0000             ;            
+0011   0000             ;            All labels, equates, and comments are mine.      
+0012   0000             ;           
+0013   0000             ;            Assemble using "TASM -80 -o20 mpu-b-rom.asm"
+0014   0000             ;            to reproduce the source file.
+0015   0000             ;
+0016   0000             
+0017   0000             CTAPE      .EQU  0              ; cassette tape I/O port
+0018   0000             CONIO      .EQU  2              ; console I/O port
+0019   0000             CONSTAT    .EQU  3              ; console status port
+0020   0000             MMU        .EQU  0F3h           ; memory management unit port
+0021   0000             FDC        .EQU  0FDh           ; floppy disk controller port
+0022   0000             WP         .EQU  0FEh           ; memory write protect port
+0023   0000             
+0024   0000             FDCMD      .EQU  0              ; offset for floppy disk unit/command byte
+0025   0000             FDRES      .EQU  1              ; offset for floppy disk result code
+0026   0000             FDTRK      .EQU  3              ; offset for floppy disk track# (byte)
+0027   0000             FDSEC      .EQU  4              ; offset for floppy disk sector# (byte)
+0028   0000             FDDMA      .EQU  5              ; offset for floppy disk DMA buffer address
+0029   0000             
+0030   0000             MPAGE      .EQU  0D000h         ; memory (for variables) base address
+0031   0000             m02        .EQU  MPAGE + 0E4h   ; scrachpad area, also monitor stack start
+0032   0000             m03        .EQU  MPAGE + 0F5h   ; video driver init stuff
+0033   0000             m04        .EQU  MPAGE + 0F6h   ; input devices (1=UART,2=PARALLEL,4=SYSTEM SERIAL)
+0034   0000             m05        .EQU  MPAGE + 0F7h   ; output devices (1=UART,2=PARALLEL,4=SYSTEM SERIAL)
+0035   0000             m06        .EQU  MPAGE + 0F8h   ; contains address where direct I/O is done
+0036   0000             m07        .EQU  MPAGE + 0FAh   ; direct I/O operations done here (2 byte I/O + return)
+0037   0000             m08        .EQU  MPAGE + 0FDh   ; contains character to be output, or FDC cmd
+0038   0000             m09        .EQU  MPAGE + 0FEh   ; address of FDC disk descriptor (0080h)
+0039   0000             
+0040   0000             VIOPAGE    .EQU  0F800h         ; VIO ROM address
+0041   0000             VIOINIT    .EQU  VIOPAGE        ; VIO initialization address
+0042   0000             VIOOUT     .EQU  VIOPAGE + 03h  ; VIO character output address
+0043   0000             VIOSTART   .EQU  VIOPAGE + 06h  ; VIO entry point
+0044   0000             VIOSIG     .EQU  VIOPAGE + 7FDh ; VIO firmware signature "VIO" 
+0045   0000             
+0046   0000             DIOPAGE    .EQU  0E000h         ; DIO disc controller base address
+0047   0000             DIOINIT    .EQU  DIOPAGE + 0Ch  ; DIO initialization address
+0048   0000             DIOSIG     .EQU  DIOPAGE + 7FDh ; DIO firmware signature "DIO"
+0049   0000             DIOEXEC1   .EQU  DIOPAGE + 06h  ; DIO execution address 
+0050   0000             DIOEXEC2   .EQU  DIOPAGE + 09h  ; DIO execution address 
+0051   0000             
+0052   0000             TIMER0     .EQU  0D100h         ; timer0 address
+0053   0000             TIMCTRL    .EQU  0D103h         ; timer control register
+0054   0000             
+0055   0000             
+0056   D800             .ORG    0D800H
+0057   D800             
+0058   D800 3E 40               LD      A,40H           
+0059   D802 D3 F3               OUT     (MMU),A         ; turn off ROM at 0000-07FF
+0060   D804 C3 10 D8            JP      j01             ; jump vector for start
+0061   D807 C3 3B DE            JP      getCh           ; jump vector for getCh
+0062   D80A C3 66 DE            JP      putCh           ; jump vector for putCh
+0063   D80D C3 EF D9            JP      mDump           ; jump vector for memory dump (addr in HL, count in DE)
+0064   D810 31 E4 D0    j01:    LD      SP,m02          ; set up monitor stack 
+0065   D813 21 80 00            LD      HL,0080H        ; store default disk descriptor address
+0066   D816 22 FE D0            LD      (m09),HL        ; at m09
+0067   D819 CD 7B D8            CALL    diskOK          ; check disk status (1=disk present)
+0068   D81C 3D                  DEC     A
+0069   D81D CA A7 D8            JP      Z,bootFD        ; disk present, so boot with jump to 0000.
+0070   D820 AF                  XOR     A               ; no disk, so continue loading monitor
+0071   D821 32 F7 D0            LD      (m05),A         ; start finding output devices
+0072   D824 21 FD FF            LD      HL,VIOSIG       ; check for video driver
+0073   D827 3E 56               LD      A,'V'          
+0074   D829 BE                  CP      (HL)            ; does video signature start with 'V'? 
+0075   D82A C2 3C D8            JP      NZ,j07          ; nope
+0076   D82D 23                  INC     HL              ; go to next character
+0077   D82E 3E 49               LD      A,'I'           
+0078   D830 BE                  CP      (HL)            ; is it an 'I'?
+0079   D831 C2 3C D8            JP      NZ,j07          ; nope
+0080   D834 3E 10               LD      A,10H           
+0081   D836 32 F7 D0            LD      (m05),A         ; mark the video driver present
+0082   D839 CD 00 F8            CALL    VIOINIT         ; and initialize it
+0083   D83C 21 FA D0    j07:    LD      HL,m07          ; put address where direct I/O is done
+0084   D83F 22 F8 D0            LD      (m06),HL        ; into memory register 06
+0085   D842 3E AE               LD      A,0AEH
+0086   D844 D3 03               OUT     (CONSTAT),A     ; set system UART mode = AE
+0087   D846 3E 27               LD      A,27H
+0088   D848 D3 03               OUT     (CONSTAT),A     ; set system UART command = 27h
+0089   D84A CD AE D8            CALL    testIO          ; find input device(s), determine baud rate
+0090   D84D 21 A7 DF            LD      HL,str4
+0091   D850 CD 59 DE            CALL    putStr          ; print "IMSAI MPU-B MONITOR" message
+0092   D853 31 E4 D0    wboot:  LD      SP,m02          ; re-establish local stack
+0093   D856 21 56 D8    j10:    LD      HL,j10          
+0094   D859 E5                  PUSH    HL              ; push monitor restart address on stack
+0095   D85A CD B5 DE            CALL    crlf            ; start a new line
+0096   D85D 3E 3F               LD      A,3FH
+0097   D85F CD 66 DE            CALL    putCh           ; print monitor command prompt "?"
+0098   D862 CD 3B DE            CALL    getCh           ; and get input character
+0099   D865 21 44 DF            LD      HL,cmdTbl       ; points to table of monitor commands
+0100   D868 CD 8A DE    j15:    CALL    getCh2          ; get next character with processing
+0101   D86B CD E1 DD            CALL    lookup          ; is it a valid command?
+0102   D86E C8                  RET     Z               ; no: return if command not found
+0103   D86F CD DB DE            CALL    space           ; yes: print a space          
+0104   D872 06 01               LD      B,1             ; handy flag for complimentary commands (ex: P/U)
+0105   D874 E9                  JP      (HL)            ; handle the command request
+0106   D875             
+0107   D875 21 95 DF    cmd2:   LD      HL,cmdTbl2      ; point to start of 2nd command table
+0108   D878 C3 68 D8            JP      j15             ; return to main program loop
+0109   D87B             
+0110   D87B CD CA DC    diskOK: CALL    initDD          ; create a disk descriptor
+0111   D87E 21 F5 D0            LD      HL,m03
+0112   D881 3A FD E7            LD      A,(DIOSIG)      ; load signature byte 1
+0113   D884 D6 44               SUB     44H             ; is it a 'D'?
+0114   D886 C2 91 D8            JP      NZ,j17          ; jump if no
+0115   D889 3A FE E7            LD      A,(DIOSIG+1)    ; load signature byte 2
+0116   D88C D6 49               SUB     49H             ; is it an 'I'?
+0117   D88E CA 96 D8            JP      Z,j18           ; found it, eval as DIO controller
+0118   D891 36 04       j17:    LD      (HL),4          ; no, so type '4' FDC
+0119   D893 C3 EC DC            JP      fdExec          ; and execute the FD command
+0120   D896 CD 0C E0    j18:    CALL    DIOINIT         ; initialize the FDC
+0121   D899 36 02               LD      (HL),2          ; mark it as controller type '2'
+0122   D89B CD EC DC            CALL    fdExec          ; and execute the FD command
+0123   D89E F0                  RET     P               ; return if successful
+0124   D89F 21 F5 D0            LD      HL,m03
+0125   D8A2 36 01               LD      (HL),1          ; mark it as controller type '1'
+0126   D8A4 C3 EC DC            JP      fdExec          ; and execute the FD command
+0127   D8A7             
+0128   D8A7 3E C0       bootFD: LD      A,0C0H          
+0129   D8A9 D3 F3               OUT     (MMU),A         ; remove ROM from memory map
+0130   D8AB C3 00 00            JP      0000h           ; and cold boot
+0131   D8AE             
+0132   D8AE             ; testIO will test for the presence of I/O ports, and determine the proper baud rate
+0133   D8AE             ; for the serial port.
+0134   D8AE             ;
+0135   D8AE DB 14       testIO: IN      A,(14H)
+0136   D8B0 21 C7 DF    j28:    LD      HL,str5
+0137   D8B3 CD 59 DE            CALL    putStr          ; print "HIT SPACE BAR" message
+0138   D8B6 21 F7 D0            LD      HL,m05         
+0139   D8B9 3E 10               LD      A,10H
+0140   D8BB A6                  AND     (HL)
+0141   D8BC 77                  LD      (HL),A
+0142   D8BD 2B                  DEC     HL
+0143   D8BE AF                  XOR     A
+0144   D8BF 77                  LD      (HL),A          ; initialize device list
+0145   D8C0             
+0146   D8C0                     ; first, test for a specific UART mode
+0147   D8C0             
+0148   D8C0 CD 53 D9            CALL    j20             ; turn on synchronous mode
+0149   D8C3 06 00               LD      B,0             ; Reg B will track devices as they are found
+0150   D8C5 DB 12               IN      A,(12h)         ; look at serial port 12 input
+0151   D8C7 B7                  OR      A               ; anything there?
+0152   D8C8 CA CC D8            JP      Z,j21           ; nope, skip to next test
+0153   D8CB 04                  INC     B               ; yep, so flag this mode
+0154   D8CC             
+0155   D8CC                     ; the loop below waits for input on serial and parallel ports,
+0156   D8CC                     ; marks which are found, and exits if parallel or system serial.
+0157   D8CC             
+0158   D8CC CD 05 DE    j21:    CALL    parIn           ; look for input on parallel port
+0159   D8CF C2 20 D9            JP      NZ,ppFnd        ; if found, mark as parellel & exit
+0160   D8D2 CD FD DD            CALL    sysIn           ; get getting input from system port 2/3
+0161   D8D5 C2 31 D9            JP      NZ,j25          ; if only on system port, mark as device 4 & exit
+0162   D8D8 78                  LD      A,B
+0163   D8D9 B7                  OR      A
+0164   D8DA CA CC D8            JP      Z,j21           ; loop until a device is found
+0165   D8DD CD F5 DD            CALL    serIn           ; try getting input from serial port 12/13h
+0166   D8E0 CA CC D8            JP      Z,j21           ; loop if nothing there
+0167   D8E3 3C          j34:    INC     A
+0168   D8E4 CA CC D8            JP      Z,j21           ; loop if FFh received
+0169   D8E7             
+0170   D8E7                     ; Serial port 12h:  Automatically determine the baud rate
+0171   D8E7                     ; When a character is ready on the UART, measure long it takes to receive it
+0172   D8E7             
+0173   D8E7 06 00               LD      B,0             ; initialize wait-for-character counter
+0174   D8E9 CD F5 DD    j27:    CALL    serIn           ; look at serial port 12/13h
+0175   D8EC CA E9 D8            JP      Z,j27           ; and wait until char is ready
+0176   D8EF 04                  INC     B               ; char incoming, count until it is received
+0177   D8F0 B7                  OR      A               ; has it been received yet?
+0178   D8F1 CA E9 D8            JP      Z,j27           ; no, keep counting until received
+0179   D8F4             
+0180   D8F4                     ; B now contains the # of above loops it took to receieve a character
+0181   D8F4                     ; use Baud Table #1 to translate this to an approximate baud rate
+0182   D8F4             
+0183   D8F4 21 1E DF            LD      HL,baudT1-1     ; point to baud rate table #1
+0184   D8F7 23          j29:    INC     HL
+0185   D8F8 7E                  LD      A,(HL)          ; get timer byte from the table
+0186   D8F9 B7                  OR      A               ; 0 = could not find baud rate
+0187   D8FA CA B0 D8            JP      Z,j28           ; so try again from the beginning
+0188   D8FD B8                  CP      B               ; compare table balue with counter
+0189   D8FE 23                  INC     HL              ; point to next value in table
+0190   D8FF DA F7 D8            JP      C,j29           ; loop if its less than counter
+0191   D902 7E                  LD      A,(HL)          ; point to next value in table       
+0192   D903 F5                  PUSH    AF              ; and save as the corresponding baud rate
+0193   D904 CD 8C D9            CALL    setBaud         ; set baud rate to A (ex: 48 = 4800 baud)
+0194   D907 06 01               LD      B,1             ; mark device '1' present
+0195   D909 CD 48 D9            CALL    j31             ; add add it to I/O device list
+0196   D90C F1                  POP     AF              ; restore table value
+0197   D90D             
+0198   D90D                  ; finally, print the baud rate that was established.
+0199   D90D             
+0200   D90D 67                  LD      H,A             ; and save as baud rate
+0201   D90E 2E 00               LD      L,0           
+0202   D910 FE 01               CP      1               ; is baud rate "100"?
+0203   D912 C2 17 D9            JP      NZ,j32 
+0204   D915 2E 10               LD      L,10H           ; convert baud 100 to 110.
+0205   D917 CD D3 DE    j32:    CALL    pHex16          ; print value as baud rate (ex "9600")
+0206   D91A 21 E4 DF            LD      HL,str7
+0207   D91D C3 59 DE            JP      putStr          ; print "BAUD SERIAL" message
+0208   D920             
+0209   D920 06 02       ppFnd:  LD      B,2             ; parallel port found, mark it as device '2'
+0210   D922 CD 48 D9            CALL    j31             ; add it to input & output devices  
+0211   D925 1F                  RRA     
+0212   D926 1F                  RRA     
+0213   D927 1F                  RRA     
+0214   D928 A0                  AND     B
+0215   D929 AE                  XOR     (HL)
+0216   D92A 77                  LD      (HL),A
+0217   D92B 21 F2 DF            LD      HL,str8
+0218   D92E C3 59 DE            JP      putStr          ; print "PARALLEL"
+0219   D931             
+0220   D931 4F          j25:    LD      C,A             ; save input in C
+0221   D932 DB 12               IN      A,(12h)         ; look at input from serial port 12h       
+0222   D934 B9                  CP      C               ; if they match,
+0223   D935 CA E3 D8            JP      Z,j34           ; jump back to input loop
+0224   D938 DB 14               IN      A,(14h)         ; look at input from parallel port 14h
+0225   D93A B9                  CP      C               ; does it match input char?
+0226   D93B CA 20 D9            JP      Z,ppFnd         ; yes, so mark it was parallel & leave
+0227   D93E 79                  LD      A,C             ; input is from system serial; get it
+0228   D93F E6 7F               AND     7FH             ; look at only the lower 7 bits
+0229   D941 FE 20               CP      20H             ; is it a ' ' space character?
+0230   D943 C2 CC D8            JP      NZ,j21          ; not a space, so return to input loop
+0231   D946 06 04               LD      B,4             ; space found, so mark as device '4'
+0232   D948             
+0233   D948             ; Save the I/O device(s) in B to the input and output bitmaps 
+0234   D948             ;
+0235   D948 21 F6 D0    j31:    LD      HL,m04          ; get current input devices
+0236   D94B 7E                  LD      A,(HL)          ; into A      
+0237   D94C B0                  OR      B               ; add in current device
+0238   D94D 77                  LD      (HL),A          ; and save back to input device list
+0239   D94E 23                  INC     HL              ; get output device list
+0240   D94F 7E                  LD      A,(HL)          ; into A
+0241   D950 B0                  OR      B               ; add current device
+0242   D951 77                  LD      (HL),A          ; and save back to output device list
+0243   D952 C9                  RET     
+0244   D953             
+0245   D953             ; Put UART in synchonous mode at a specific speed
+0246   D953             ;
+0247   D953 21 42 00    j20:    LD      HL,0042H
+0248   D956 CD A0 D9            CALL    setT0           ; set timer0 counter value with HL
+0249   D959 CD 77 D9            CALL    resetU          ; reset UART
+0250   D95C 3E 4C               LD      A,4CH           ; command byte = 4C
+0251   D95E D3 13               OUT     (13H),A         ; send reset command
+0252   D960 3E FF               LD      A,0FFH
+0253   D962 D3 13               OUT     (13H),A
+0254   D964 D3 13               OUT     (13H),A
+0255   D966 3E B7               LD      A,0B7H          ; command B7:
+0256   D968 D3 13               OUT     (13H),A         ; puts UART in synchronous mode
+0257   D96A C9                  RET     
+0258   D96B             
+0259   D96B             ; Set up serial port UART at ports 12/13h with normal settings
+0260   D96B             ;
+0261   D96B CD 77 D9    initU:  CALL    resetU          ; UART soft reset
+0262   D96E 3E AE               LD      A,0AEH          ; AE = baud 1/16th clk, 8 bits, no parity, 1.5 stop
+0263   D970 D3 13               OUT     (13H),A         ; send mode byte
+0264   D972 3E 37               LD      A,37H           ; 37 = reset flags, RTS/DTR true, Rx/Tx enabled
+0265   D974 D3 13               OUT     (13H),A         ; send command byte
+0266   D976 C9                  RET     
+0267   D977             
+0268   D977             ;  Do a software reset of the serial UART at ports 12/13h
+0269   D977             ;
+0270   D977 AF          resetU: XOR     A       
+0271   D978 D3 13               OUT     (13H),A         ; prepare reset
+0272   D97A D3 13               OUT     (13H),A
+0273   D97C D3 13               OUT     (13H),A
+0274   D97E 3E 40               LD      A,40H           ; 40h = reset UART command
+0275   D980 D3 13               OUT     (13H),A         ; do UART software reset
+0276   D982 C9                  RET     
+0277   D983             
+0278   D983             ; Handle the Change Baud Rate "Z" command
+0279   D983             ;
+0280   D983 CD E0 DE    cmdZ:   CALL    getHex          ; get desired baud rate from user
+0281   D986 7C                  LD      A,H
+0282   D987 B5                  OR      L               ; is it zero/no input?
+0283   D988 CA B0 D8            JP      Z,j28           ; do 2 terminal procedure
+0284   D98B 7C                  LD      A,H
+0285   D98C             
+0286   D98C 21 2E DF    setBaud:LD      HL,baudT2       ; point to baud rate table #2
+0287   D98F C5                  PUSH    BC
+0288   D990 CD E1 DD            CALL    lookup          ; find baud rate & timer count
+0289   D993 C1                  POP     BC
+0290   D994 C4 A0 D9            CALL    NZ,setT0        ; set timer0 value
+0291   D997 C2 6B D9            JP      NZ,initU        ; initialize UART is usual manner
+0292   D99A 21 D7 DF            LD      HL,str6         ; could not find baud rate, so
+0293   D99D C3 59 DE            JP      putStr          ; print "INVALID BAUD" message
+0294   D9A0             
+0295   D9A0             ; The following routine sets up timer0 with the count value in HL
+0296   D9A0             ;
+0297   D9A0 11 03 D1    setT0:  LD      DE,TIMCTRL      ; DE = timer control address
+0298   D9A3 EB                  EX      DE,HL
+0299   D9A4 36 36               LD      (HL),36H        ; 36h = timer0, read lsb/msb, mode 3, binary
+0300   D9A6 21 00 D1            LD      HL,TIMER0       ; load the value into timer0
+0301   D9A9 73                  LD      (HL),E          ; store LSB first,
+0302   D9AA 72                  LD      (HL),D          ; then MSB
+0303   D9AB C9                  RET     
+0304   D9AC             
+0305   D9AC             ; Handle the Jump Memory "J" and Call Routine "C" commands
+0306   D9AC             ;
+0307   D9AC D1          cmdJ:   POP     DE              ; remove return address from the stack
+0308   D9AD CD E0 DE    cmdC:   CALL    getHex          ; get address from user
+0309   D9B0 E9                  JP      (HL)            ; and go there.
+0310   D9B1             
+0311   D9B1             ; Handle the Kill ROM & Jump "K" command
+0312   D9B1             ;
+0313   D9B1 CD E0 DE    cmdK:   CALL    getHex          ; get address from user
+0314   D9B4 3E C0               LD      A,0C0H
+0315   D9B6 D3 F3               OUT     (MMU),A         ; remove ROM from memory map
+0316   D9B8 E9                  JP      (HL)            ; and jump to the address
+0317   D9B9             
+0318   D9B9             ; Handle the Quit MPU-B and Jump to VIO monitor "Q" command
+0319   D9B9             ;
+0320   D9B9 3A F7 D0    cmdQ:   LD      A,(m05)         ; is video initialized?
+0321   D9BC E6 10               AND     10H             ; look at bit4 (video) only
+0322   D9BE C8                  RET     Z               ; continue only if video present
+0323   D9BF 3E C0               LD      A,0C0H
+0324   D9C1 D3 F3               OUT     (MMU),A         ; remove ROM from memory map
+0325   D9C3 C3 06 F8            JP      VIOSTART        ; and jump to VIO monitor
+0326   D9C6             
+0327   D9C6             ; Handle the Examine memory "E" command
+0328   D9C6             ;
+0329   D9C6 CD E0 DE    cmdE:   CALL    getHex          ; get address from user
+0330   D9C9 CD B5 DE    j41:    CALL    crlf 
+0331   D9CC CD D3 DE            CALL    pHex16          ; print address + space
+0332   D9CF CD E0 D9            CALL    mod8            ; print byte, prompt for new value
+0333   D9D2 2B                  DEC     HL              ; point to previous address
+0334   D9D3 FE 0A               CP      0AH             ; if user pressed <enter>
+0335   D9D5 C8                  RET     Z               ; then quit
+0336   D9D6 FE 2D               CP      '-'             ; if user pressed minus '-' key
+0337   D9D8 CA C9 D9            JP      Z,j41           ; then show value at previous addr
+0338   D9DB 23                  INC     HL              ; otherwise advance to next addr
+0339   D9DC 23                  INC     HL
+0340   D9DD C3 C9 D9            JP      j41             ; and show it.
+0341   D9E0             
+0342   D9E0             ; mod8 shows the byte value at address HL, in hex, and allows user to change it.
+0343   D9E0             ;        
+0344   D9E0 7E          mod8:   LD      A,(HL)          ; get byte from HL
+0345   D9E1 5F                  LD      E,A             ; save value in E
+0346   D9E2 CD D8 DE            CALL    pHexSp          ; print value, followed by space       
+0347   D9E5 EB                  EX      DE,HL           ; temp save HL
+0348   D9E6 CD E3 DE            CALL    j39             ; get new value into L
+0349   D9E9 EB                  EX      DE,HL           ; restore HL, new value now in E
+0350   D9EA 73                  LD      (HL),E          ; store new value to memory
+0351   D9EB C9                  RET     
+0352   D9EC             
+0353   D9EC             ; Handle the Display/Dump memory "D" command:
+0354   D9EC             ;
+0355   D9EC             ; Parameters are start address (HL) and optional end address in DE
+0356   D9EC             ; If no end address, just one byte is printed.
+0357   D9EC             ; After 24 lines print, it will wait for a keypress before continuing
+0358   D9EC             ;
+0359   D9EC CD AF DD    cmdD:   CALL    param2          ; get start address in HL and count in BC      
+0360   D9EF 1E 18       mDump:  LD      E,24            ; E = line counter.  Up to 24 lines/screen
+0361   D9F1 E5                  PUSH    HL              ; push start addr on stack
+0362   D9F2 53          j52:    LD      D,E             ; reset D to line counter
+0363   D9F3 D5          j50:    PUSH    DE              ; save current line counter on stack
+0364   D9F4 16 11               LD      D,17            ; set up a counter for 17 bytes
+0365   D9F6 21 F5 D0            LD      HL,m03          ; clear out memory between stack and m03
+0366   D9F9 AF                  XOR     A               ; A=0
+0367   D9FA 2B          j44:    DEC     HL              ; going backwards,
+0368   D9FB 77                  LD      (HL),A          ; clear memory
+0369   D9FC 15                  DEC     D               ; one byte at a time,
+0370   D9FD C2 FA D9            JP      NZ,j44          ; until all bytes are cleared
+0371   DA00 D1                  POP     DE              ; restore line counter
+0372   DA01 E3                  EX      (SP),HL         ; swap start address and ASCII store area
+0373   DA02             
+0374   DA02                     ; the line begins with printing the memory address
+0375   DA02             
+0376   DA02 CD B5 DE            CALL    crlf            ; start new line
+0377   DA05 CD D3 DE            CALL    pHex16          ; with address shown
+0378   DA08 CD DB DE            CALL    space           ; followed by a space
+0379   DA0B             
+0380   DA0B                     ; printing of each hex value in the line starts here
+0381   DA0B             
+0382   DA0B CD 3B DE    j49:    CALL    getCh           ; does user want to stop output?
+0383   DA0E C2 4F DA            JP      NZ,j45          ; yep, so quit
+0384   DA11 7E                  LD      A,(HL)          ; get byte at current address
+0385   DA12 CD D8 DE            CALL    pHexSp          ; and print it, followed by a space
+0386   DA15 7E                  LD      A,(HL)          ; reload the byte
+0387   DA16 23                  INC     HL              ; go to next address
+0388   DA17             
+0389   DA17                     ; before going to the next byte, store an ASCII representation of the value 
+0390   DA17                     ; in the scratchpad area, replacing nonprintable values with '.'
+0391   DA17                 
+0392   DA17 E3                  EX      (SP),HL         ; swap scratchpad address back in      
+0393   DA18 77                  LD      (HL),A          ; store byte as a potential ASCII char
+0394   DA19 FE 20               CP      20H             ; is the byte a control character?
+0395   DA1B DA 23 DA            JP      C,j46           ; if so, replace with a '.'
+0396   DA1E FE 7F               CP      7FH             ; is the value above ASCII range?
+0397   DA20 DA 25 DA            JP      C,j47           ; if not, keep as a printable character
+0398   DA23 36 2E       j46:    LD      (HL),'.'        ; replace nonprintable char with '.'
+0399   DA25 23          j47:    INC     HL              ; go to next location in ASCII string
+0400   DA26 0B                  DEC     BC              ; decrement byte counter
+0401   DA27 78                  LD      A,B             
+0402   DA28 B1                  OR      C               ; BC=0 all done?
+0403   DA29 CA 34 DA            JP      Z,j48           ; exit if done
+0404   DA2C             
+0405   DA2C                     ; Evaluate if there are more bytes to show in this line
+0406   DA2C               
+0407   DA2C E3                  EX      (SP),HL         ; swap current addr back in
+0408   DA2D 7D                  LD      A,L             ; look at lower byte
+0409   DA2E E6 0F               AND     0FH             ; are we on a 16 byte boundary (xxx0)?
+0410   DA30 C2 0B DA            JP      NZ,j49          ; loop if not yet
+0411   DA33             
+0412   DA33                     ; All 16 bytes have been printed as hex values, so print the ASCII string   
+0413   DA33             
+0414   DA33 E3                  EX      (SP),HL         ; swap addr back out
+0415   DA34 CD DB DE    j48:    CALL    space           ; print a space
+0416   DA37 21 E4 D0            LD      HL,m02          ; point to the ASCII string 
+0417   DA3A CD 59 DE            CALL    putStr          ; and print it
+0418   DA3D             
+0419   DA3D                     ; Evaluate if there are more lines to print, and loop accordingly
+0420   DA3D             
+0421   DA3D 78                  LD      A,B
+0422   DA3E B1                  OR      C               ; if byte counter is zero
+0423   DA3F CA 4F DA            JP      Z,j45           ; then quit
+0424   DA42 15                  DEC     D               ; decrement line counter
+0425   DA43 C2 F3 D9            JP      NZ,j50          ; do next line if space left on screen
+0426   DA46 CD 34 DE            CALL    getCh1          ; have shown 24 lines, now wait for user
+0427   DA49 CD B5 DE            CALL    crlf            ; start next line
+0428   DA4C C3 F2 D9            JP      j52             ; with reset of line counter
+0429   DA4F E1          j45:    POP     HL              ; get rid of start addr pushed on stack
+0430   DA50 C3 B5 DE            JP      crlf 
+0431   DA53             
+0432   DA53             ; Handle Protect "P" and Unprotect "U" memory commands
+0433   DA53             ; The command sent to the write protect port has the form "NNNNNNxx"
+0434   DA53             ; where NNNNNN is the 1K block of memory (0-63 decimal = addr 0000-FC00) 
+0435   DA53             ; and xx is the command (01=protect, 00=unprotect)
+0436   DA53             ;
+0437   DA53 04          cmdP:   INC     B               ; protect command=1, unprotect cmd=0
+0438   DA54 CD BC DD    cmdU:   CALL    getHD           ; get start (HD) and end (DE) addresses
+0439   DA57 7A                  LD      A,D             ; with MSB of destination address
+0440   DA58 E6 FC               AND     0FCh            ; mask it to 1K boundary
+0441   DA5A B0                  OR      B               ; add in P/U command bit (bit0)
+0442   DA5B 57                  LD      D,A             ; and put result back into D.
+0443   DA5C 7C                  LD      A,H             ; with MSB of start address,
+0444   DA5D E6 FC               AND     0FCh            ; mask to 1K boundary
+0445   DA5F B0                  OR      B               ; and add in P/U command bit
+0446   DA60 D3 FE       j54:    OUT     (WP),A          ; send command to Write Protect Unit
+0447   DA62 BA                  CP      D               ; are we at destination 1K block yet?
+0448   DA63 C8                  RET     Z               ; quit when done
+0449   DA64 C6 04               ADD     A,4             ; otherwise point to next 1K (4x256) block
+0450   DA66 C3 60 DA            JP      j54             ; and loop until done
+0451   DA69             
+0452   DA69             ;  Handle Tape Hex Loader "H" command.  Reads input in Intel Hex format.
+0453   DA69             ;  If a checksum error is found then 'C' is output. 
+0454   DA69             ;  If an invalid character is found then 'T' will be output
+0455   DA69             ;
+0456   DA69 CD 8A DE    cmdH:   CALL    getCh2          ; get next character with processing
+0457   DA6C D6 3A               SUB     ':'             ; is it a colon ':'?
+0458   DA6E C2 69 DA            JP      NZ,cmdH         ; no, so keep reading until colon found
+0459   DA71 57                  LD      D,A             ; start of new line, set checksum to 0
+0460   DA72 CD 96 DA            CALL    j56             ; read in next 2 hex digits, convert to number (byte counter)
+0461   DA75 C8                  RET     Z               ; if zero, then complete file has been read
+0462   DA76 43                  LD      B,E             ; otherwise, result is #byte in this line
+0463   DA77 CD 96 DA            CALL    j56             ; read next 2 hex digits, convert to number 
+0464   DA7A 63                  LD      H,E             ; put result in H
+0465   DA7B CD 96 DA            CALL    j56             ; read in 2 hex digits, convert to number 
+0466   DA7E 6B                  LD      L,E             ; put result in L.  Now we have address to store data
+0467   DA7F CD 96 DA            CALL    j56             ; read in 2 hex digits, convert to number 
+0468   DA82 CD 96 DA    j57:    CALL    j56             ; read in 2 hex digits, convert to number (data byte)
+0469   DA85 73                  LD      (HL),E          ; put data byte into memory       
+0470   DA86 23                  INC     HL              ; go to next memory address
+0471   DA87 05                  DEC     B               ; and decrement byte counter       
+0472   DA88 C2 82 DA            JP      NZ,j57          ; loop until entire line is read 
+0473   DA8B CD 96 DA            CALL    j56             ; read in 2 hex digits, convert to number (checksum)
+0474   DA8E CA 69 DA            JP      Z,cmdH          ; loop to read next line if checksum is valid
+0475   DA91 3E 43               LD      A,'C'           ; otherwise,
+0476   DA93 C3 66 DE            JP      putCh           ; print 'C' = checksum error
+0477   DA96             
+0478   DA96             ; tape loader helper function, which reads in two hex characters
+0479   DA96             ; and converts them to a byte value
+0480   DA96             ;       
+0481   DA96 CD 8A DE    j56:    CALL    getCh2          ; get next character with processing
+0482   DA99 CD F9 DE            CALL    isHex           ; convert ASCII character to hex digit
+0483   DA9C DA 8B DB            JP      C,j59           ; jump if not hex digit
+0484   DA9F 87                  ADD     A,A             ; first digit obtained. Multiply x 16 = shift left
+0485   DAA0 87                  ADD     A,A             ; mpy x 4
+0486   DAA1 87                  ADD     A,A             ; mpy x 8
+0487   DAA2 87                  ADD     A,A             ; mpy x 16
+0488   DAA3 5F                  LD      E,A             ; store result in E
+0489   DAA4 CD 8A DE            CALL    getCh2          ; get next character with processing
+0490   DAA7 CD F9 DE            CALL    isHex           ; convert ASCII character to hex digit
+0491   DAAA DA 8B DB            JP      C,j59           ; jump if not hex digit
+0492   DAAD 83                  ADD     A,E             ; combine 1st and 2nd digits
+0493   DAAE 5F                  LD      E,A             ; store result in E
+0494   DAAF 82                  ADD     A,D             ; add result to reg D
+0495   DAB0 57                  LD      D,A             ; where a running total kept for checksum
+0496   DAB1 C9                  RET     
+0497   DAB2             
+0498   DAB2             ; Handle the Test Memory "T" command
+0499   DAB2             ;
+0500   DAB2 CD AF DD    cmdT:   CALL    param2          ; get start address in HL and count in BC 
+0501   DAB5 0B                  DEC     BC
+0502   DAB6 AF          j62:    XOR     A               ; start with byte pattern = 00
+0503   DAB7 56                  LD      D,(HL)          ; save actual memory byte in D
+0504   DAB8 77          j61:    LD      (HL),A          ; store pattern to memory
+0505   DAB9 BE                  CP      (HL)            ; and read it back.  Same?
+0506   DABA C2 CE DA            JP      NZ,j60          ; if not, show address & contents
+0507   DABD 3D                  DEC     A               ; go to next byte pattern
+0508   DABE C2 B8 DA            JP      NZ,j61          ; and loop through all patterns
+0509   DAC1 72                  LD      (HL),D          ; restore original byte to memory 
+0510   DAC2 CD 3B DE            CALL    getCh           ; check to see if user wants to quit
+0511   DAC5 C0                  RET     NZ              ; quit now if so
+0512   DAC6 23                  INC     HL              ; go to next memory location
+0513   DAC7 0B                  DEC     BC              ; and decrement byte counter
+0514   DAC8 78                  LD      A,B
+0515   DAC9 B1                  OR      C               ; finished (BC=0)?
+0516   DACA C2 B6 DA            JP      NZ,j62          ; no, so go to next address to test
+0517   DACD C9                  RET     
+0518   DACE             
+0519   DACE 23          j60:    INC     HL              ; helper function for Test Memory command
+0520   DACF 5F                  LD      E,A             ; save current byte pattern
+0521   DAD0 CD 12 DF            CALL    showAB          ; show address HL-1 and its byte contents 
+0522   DAD3 7B                  LD      A,E             ; restore byte pattern
+0523   DAD4 C3 0E DF            JP      j64             ; show expected byte pattern
+0524   DAD7             
+0525   DAD7             ; Handle the Move Memory "M" command
+0526   DAD7             ; call with <start addr>,<end addr>,<destination addr>
+0527   DAD7             ;
+0528   DAD7 CD D2 DD    cmdM:   CALL    param3          ; load parameters in HL, DE, and BC
+0529   DADA C3 5E DB    j67:    JP      memcpy          ; and do it.
+0530   DADD             
+0531   DADD             ; Handle the Fill Memory "F" command
+0532   DADD             ; call with <start addr>, <end addr>, <fill character>
+0533   DADD             ;
+0534   DADD CD D2 DD    cmdF:   CALL    param3          ; laod parameters into HL, DE, and BC
+0535   DAE0 7B                  LD      A,E             ; fill character in DE moved to A
+0536   DAE1 77                  LD      (HL),A          ; store first fill char at start address
+0537   DAE2 0B                  DEC     BC              ; cound one done!
+0538   DAE3 54                  LD      D,H             ; DE = HL
+0539   DAE4 5D                  LD      E,L
+0540   DAE5 13                  INC     DE              ; set destination = start + 1
+0541   DAE6 C3 DA DA            JP      j67             ; and do a memory copy
+0542   DAE9             
+0543   DAE9             ; Handle the Input "I" and Output "O" port commands
+0544   DAE9             ;      
+0545   DAE9 05          cmdI:   DEC     B               
+0546   DAEA CD D8 DD    cmdO:   CALL    getHD2          ; get port# and value (for output)
+0547   DAED 78                  LD      A,B             ; A=0 for IN, 1 for OUT
+0548   DAEE 07                  RLCA                    ; 3 rotates set up A to contain I/O opcode
+0549   DAEF 07                  RLCA    
+0550   DAF0 07                  RLCA                    ; now A=0 for IN, 08 for OUT
+0551   DAF1 EE DB               XOR     0DBh            ; now A=DB for IN, D3 for OUT 
+0552   DAF3 55                  LD      D,L             ; put port# in D
+0553   DAF4 2A F8 D0            LD      HL,(m06)        ; get address for I/O
+0554   DAF7 77                  LD      (HL),A          ; store opcode (IN or OUT)
+0555   DAF8 BE                  CP      (HL)            ; did it stick?
+0556   DAF9 C0                  RET     NZ              ; nope, this memory aint no good.
+0557   DAFA E5                  PUSH    HL              ; save this address
+0558   DAFB 23                  INC     HL              
+0559   DAFC 72                  LD      (HL),D          ; after opcode, add port#
+0560   DAFD 23                  INC     HL      
+0561   DAFE 36 C9               LD      (HL),0C9h       ; after port#, add RET opcode
+0562   DB00 21 08 DB            LD      HL,j53          ; put return address on stack
+0563   DB03 E3                  EX      (SP),HL          
+0564   DB04 78                  LD      A,B
+0565   DB05 B7                  OR      A
+0566   DB06 7B                  LD      A,E
+0567   DB07 E9                  JP      (HL)            ; execute the I/O instruction
+0568   DB08 CA D8 DE    j53:    JP      Z,pHexSp        
+0569   DB0B C9                  RET     
+0570   DB0C             
+0571   DB0C             ; Handle the Change direct I/O address "Y" command
+0572   DB0C             ;
+0573   DB0C CD E0 DE    cmdY:   CALL    getHex          ; get address from user into HL
+0574   DB0F 7C                  LD      A,H
+0575   DB10 B5                  OR      L               ; 0= no address entered?
+0576   DB11 C2 17 DB            JP      NZ,j69          ; user entered address, so use it
+0577   DB14 21 FA D0            LD      HL,m07          ; otherwise, reset to original location m07
+0578   DB17 22 F8 D0    j69:    LD      (m06),HL        ; put new address in m06
+0579   DB1A C9                  RET     
+0580   DB1B             
+0581   DB1B             ; Handle the Verify memory "V" command. 
+0582   DB1B             ; The parameters are start (HL), destination (DE), and count (BC)  
+0583   DB1B             ;
+0584   DB1B CD D2 DD    cmdV:   CALL    param3          ; load parameters into HL, DE, BC
+0585   DB1E 1A          j72:    LD      A,(DE)          ; A = byte at destination addr
+0586   DB1F BE                  CP      (HL)            ; is it same as byte at source addr?
+0587   DB20 23                  INC     HL              ; go to next source byte
+0588   DB21 13                  INC     DE              ; go to next dest byte
+0589   DB22 CA 2D DB            JP      Z,j70           ; if same, continue verification process
+0590   DB25 CD 12 DF            CALL    showAB          ; not same: show source addr & contents
+0591   DB28 EB                  EX      DE,HL           ; flip to DE
+0592   DB29 CD 15 DF            CALL    j71             ; show dest addr & its contents
+0593   DB2C EB                  EX      DE,HL           ; flip back
+0594   DB2D 0B          j70:    DEC     BC              ; decrement byte counter
+0595   DB2E 78                  LD      A,B     
+0596   DB2F B1                  OR      C               ; byte counter = 0?
+0597   DB30 C8                  RET     Z               ; quit if it is.
+0598   DB31 CD 3B DE            CALL    getCh           ; does user want to quit verification?
+0599   DB34 C0                  RET     NZ              ; yes, quit
+0600   DB35 C3 1E DB            JP      j72             ; no, keep going.
+0601   DB38             
+0602   DB38             ; Handle Search Memory "S" command
+0603   DB38             ; Parameters are start addr (HL), value to find (DE), byte counter (BC), optional mask (SP)
+0604   DB38             ;
+0605   DB38 CD D2 DD    cmdS:   CALL    param3          ; load parameters into HL, DE, and BC 
+0606   DB3B E5                  PUSH    HL              ; put start address on stack
+0607   DB3C 21 FF FF            LD      HL,0FFFFh       ; assume full 16-bit compare (mask FFFF)       
+0608   DB3F FE 0A               CP      0AH             ; if no 4th parameter 
+0609   DB41 C4 E0 DE            CALL    NZ,getHex       ; otherwise, get mask into HL 
+0610   DB44 E3                  EX      (SP),HL         ; swap mask and start addr.
+0611   DB45 7E          j75:    LD      A,(HL)          ; grab byte at current address
+0612   DB46 E3                  EX      (SP),HL         ; swap mask into HL
+0613   DB47 A4                  AND     H               ; apply mask to current byte
+0614   DB48 BA                  CP      D               ; do compare with search value
+0615   DB49 E3                  EX      (SP),HL         ; swap mask out
+0616   DB4A 23                  INC     HL              ; point to next byte to check
+0617   DB4B C2 56 DB            JP      NZ,j73          ; no match, so continue search
+0618   DB4E 7E                  LD      A,(HL)          ; MSB matches, so check LSB now
+0619   DB4F E3                  EX      (SP),HL         ; swap in mask
+0620   DB50 A5                  AND     L               ; apply mask to LSB
+0621   DB51 BB                  CP      E               ; and compare it to seach LSB
+0622   DB52 E3                  EX      (SP),HL         ; swap mask back out
+0623   DB53 CC 0A DF            CALL    Z,showAW        ; if match, show address (HL-1) and word contents
+0624   DB56 0B          j73:    DEC     BC              ; decrement byte counter          
+0625   DB57 78                  LD      A,B
+0626   DB58 B1                  OR      C               ; is byte counter 0?
+0627   DB59 C2 45 DB            JP      NZ,j75          ; not done yet, so grab next byte
+0628   DB5C C1                  POP     BC              ; get rid of mask pushed on stack
+0629   DB5D C9                  RET     
+0630   DB5E             
+0631   DB5E             ; Copy Memory from source (HL) to destination (DE)
+0632   DB5E             ; BC = number of bytes to copy
+0633   DB5E             ;
+0634   DB5E 78          memcpy: LD      A,B             
+0635   DB5F B1                  OR      C               ; all done (byte counter BC=0)?
+0636   DB60 C8                  RET     Z               ; quit if so
+0637   DB61 7E                  LD      A,(HL)          ; get next byte from source
+0638   DB62 12                  LD      (DE),A          ; and store it at destination
+0639   DB63 0B                  DEC     BC              ; decrement byte counter
+0640   DB64 23                  INC     HL              ; increment source address
+0641   DB65 13                  INC     DE              ; increment destination address
+0642   DB66 C3 5E DB            JP      memcpy          ; loop until done
+0643   DB69             
+0644   DB69             ; Handle the Execute "X" and Load "L" Cassette File commands
+0645   DB69             ;
+0646   DB69 05          cmdX:   DEC     B
+0647   DB6A C5          cmdL:   PUSH    BC              ; save command X (B=0) vs L (B=1)
+0648   DB6B CD BC DD            CALL    getHD           ; get start(HL) and end(DE) addresses
+0649   DB6E 7A                  LD      A,D
+0650   DB6F B3                  OR      E               ; no end address?
+0651   DB70 CA 85 DB            JP      Z,j76           ; will get parameters from file instead
+0652   DB73 E5                  PUSH    HL              ; save start addr on stack
+0653   DB74 D5                  PUSH    DE              ; save end addr on stack
+0654   DB75 CD E0 DE            CALL    getHex          ; get execution addr
+0655   DB78 E5                  PUSH    HL              ; and save it on stack, too.
+0656   DB79 CD E7 DB            CALL    getHdr          ; read in tape header, Z=success
+0657   DB7C C2 93 DB            JP      NZ,j78
+0658   DB7F F1                  POP     AF              ; discard addresses from header
+0659   DB80 F1                  POP     AF              ; since user specified them.
+0660   DB81 F1                  POP     AF
+0661   DB82 C3 93 DB            JP      j78
+0662   DB85 CD E7 DB    j76:    CALL    getHdr          ; read in tape header, Z=success
+0663   DB88 CA 93 DB    j80:    JP      Z,j78
+0664   DB8B 3E 54       j59:    LD      A,'T'
+0665   DB8D CD 66 DE    j91:    CALL    putCh           ; print error message 'T'
+0666   DB90 C3 56 D8            JP      j10             ; and warm boot monitor
+0667   DB93             
+0668   DB93                     ; start, end, and exec addresses are now on stack
+0669   DB93                     ; use them to calculate number of records to be read
+0670   DB93             
+0671   DB93 C1          j78:    POP     BC              ; BC = exec addr
+0672   DB94 E1                  POP     HL              ; HL = end addr
+0673   DB95 D1                  POP     DE              ; DE = start addr
+0674   DB96 C5                  PUSH    BC              ; save 'em all back to stack
+0675   DB97 E5                  PUSH    HL
+0676   DB98 D5                  PUSH    DE
+0677   DB99 7D                  LD      A,L             ; do 16-bit math (HL = HL-DE)
+0678   DB9A 93                  SUB     E
+0679   DB9B 6F                  LD      L,A             ; now L = L- E
+0680   DB9C 7C                  LD      A,H 
+0681   DB9D 9A                  SBC     A,D             ; account for carry from previous sub
+0682   DB9E 67                  LD      H,A             ; now H = H - D
+0683   DB9F 29                  ADD     HL,HL           ; multiply x 2 since records are 128b not 256b      
+0684   DBA0 4C                  LD      C,H             ; number of 128-byte records between end & start
+0685   DBA1 0C                  INC     C               ; C = number of records to read
+0686   DBA2             
+0687   DBA2                     ; read in 128-byte records from cassette tape
+0688   DBA2                     ; checking record type at start and checksum at end of each record
+0689   DBA2             
+0690   DBA2 CD 43 DC    j85:    CALL    readC           ; read record type at start of each record
+0691   DBA5 FE 81               CP      81H             ; must be type '81'
+0692   DBA7 C2 88 DB            JP      NZ,j80          ; if wrong file type, exit with error
+0693   DBAA CD 43 DC            CALL    readC           ; read next byte as record length
+0694   DBAD 47                  LD      B,A             ; save it in B as a counter
+0695   DBAE 21 00 00            LD      HL,0000         ; initialize checksum for this record
+0696   DBB1 CD 53 DC    j82:    CALL    j81             ; read in data byte & add it to checksum
+0697   DBB4 12                  LD      (DE),A          ; store byte to destination address
+0698   DBB5 13                  INC     DE              ; increment address
+0699   DBB6 05                  DEC     B               ; decrement byte counter
+0700   DBB7 C2 B1 DB            JP      NZ,j82          ; loop until entire record is read
+0701   DBBA D5                  PUSH    DE              ; temp save destination address
+0702   DBBB EB                  EX      DE,HL           ; save actual checksum in DE
+0703   DBBC CD 8A DC            CALL    readHL          ; read expected checksum from cassette
+0704   DBBF 65                  LD      H,L
+0705   DBC0 6F                  LD      L,A
+0706   DBC1 19                  ADD     HL,DE           ; add them together
+0707   DBC2 7C                  LD      A,H
+0708   DBC3 B5                  OR      L               ; is HL=0?
+0709   DBC4 3E 43               LD      A,'C'
+0710   DBC6 C4 66 DE            CALL    NZ,putCh        ; no: print 'C' for checksum error
+0711   DBC9 C2 D1 DB            JP      NZ,j84
+0712   DBCC 3E 2A               LD      A,'*'           
+0713   DBCE CD 66 DE            CALL    putCh           ; yes: print '*' for successful record load
+0714   DBD1 D1          j84:    POP     DE              ; restore destination address
+0715   DBD2 0D                  DEC     C               ; decrement record counter
+0716   DBD3 C2 A2 DB            JP      NZ,j85          ; loop until all records are read
+0717   DBD6             
+0718   DBD6                     ; File load complete.
+0719   DBD6                     ; Display the starting, ending, and execution addresses.
+0720   DBD6             
+0721   DBD6 CD B5 DE            CALL    crlf 
+0722   DBD9 0E 03               LD      C,03H           ; three words to display     
+0723   DBDB E1          j86:    POP     HL              ; get each one off of the stack
+0724   DBDC CD D3 DE            CALL    pHex16          ; and show it
+0725   DBDF 0D                  DEC     C
+0726   DBE0 C2 DB DB            JP      NZ,j86          ; loop until done
+0727   DBE3             
+0728   DBE3                     ; Load vs Exec
+0729   DBE3             
+0730   DBE3 F1                  POP     AF              ; which command (Exec vs Load) are we doing?
+0731   DBE4 1F                  RRA                     ; rotate through carry
+0732   DBE5 D8                  RET     C               ; return if was Load cmd
+0733   DBE6 E9                  JP      (HL)            ; otherwise jump if it was Exec cmd
+0734   DBE7             
+0735   DBE7             ; Read the cassette file header
+0736   DBE7             ;
+0737   DBE7 CD 0F DC    getHdr: CALL    readS           ; read sync stream
+0738   DBEA CD 43 DC            CALL    readC           ; read byte from cassette
+0739   DBED FE 01               CP      01H             ; is it 01?
+0740   DBEF C0                  RET     NZ              ; if not, read failed.
+0741   DBF0 CD 43 DC            CALL    readC           ; read 2nd byte from cassette
+0742   DBF3 0E 05               LD      C,5             ; next, read filename:
+0743   DBF5 CD 43 DC    j88:    CALL    readC           ; read 5 bytes from cassette
+0744   DBF8 CD 66 DE            CALL    putCh           ; and echo them to console
+0745   DBFB 0D                  DEC     C               
+0746   DBFC C2 F5 DB            JP      NZ,j88          ; loop until 5 bytes read
+0747   DBFF 0E 03               LD      C,3             ; read in 3 addresses
+0748   DC01 CD 8A DC    j89:    CALL    readHL          ; get HL value from cassette
+0749   DC04 E3                  EX      (SP),HL         ; swap it to stack
+0750   DC05 E5                  PUSH    HL              
+0751   DC06 0D                  DEC     C
+0752   DC07 C2 01 DC            JP      NZ,j89          ; loop until done
+0753   DC0A CD 8A DC            CALL    readHL          ; get final value
+0754   DC0D AF                  XOR     A
+0755   DC0E C9                  RET     
+0756   DC0F             
+0757   DC0F             ;  Reads sync stream from cassette
+0758   DC0F             ;
+0759   DC0F CD 79 DC    readS:  CALL    j90             ; wait until 1st sync byte received
+0760   DC12 06 1F               LD      B,31            ; count 31 more bytes
+0761   DC14 CD 43 DC    j92:    CALL    readC           ; read byte from cassette
+0762   DC17 FE E6               CP      0E6H            ; is it sync byte E6?
+0763   DC19 3E 49               LD      A,'I'           
+0764   DC1B C2 8D DB            JP      NZ,j91          ; if not, exit with eror 'I'
+0765   DC1E 05                  DEC     B
+0766   DC1F C2 14 DC            JP      NZ,j92          ; loop until done
+0767   DC22 C9                  RET     
+0768   DC23             
+0769   DC23             ; sendC sends a byte to the cassette port
+0770   DC23             ;
+0771   DC23 F5          sendC:  PUSH    AF              ; save byte to send
+0772   DC24 DB 03       j93:    IN      A,(CONSTAT)     ; check system serial status 
+0773   DC26 E6 04               AND     04h             ; look only at bit2 (Tx empty?)
+0774   DC28 CA 24 DC            JP      Z,j93           ; wait until ready
+0775   DC2B F1                  POP     AF              ; restore byte to send
+0776   DC2C D3 00               OUT     (CTAPE),A       ; send it out cassette port
+0777   DC2E C9                  RET     
+0778   DC2F             
+0779   DC2F             ; Handle the Generate Sync Stream "G" command
+0780   DC2F             ;
+0781   DC2F CD E0 DE    cmdG:   CALL    getHex 
+0782   DC32 3E 10               LD      A,10H
+0783   DC34 D3 03               OUT     (CONSTAT),A
+0784   DC36 3E E6       j95:    LD      A,0E6H          ; byte 'E6'
+0785   DC38 CD 23 DC            CALL    sendC           ; send it to cassette
+0786   DC3B DB 03               IN      A,(CONSTAT)     ; check system serial status
+0787   DC3D E6 02               AND     02H             ; look only at bit1 (Rx ready)
+0788   DC3F C0                  RET     NZ              ; return when ready
+0789   DC40 C3 36 DC            JP      j95             ; keep sending until ready
+0790   DC43             
+0791   DC43             ; readC reads a byte from cassette
+0792   DC43             ;
+0793   DC43 CD 3B DE    readC:  CALL    getCh           ; allow user to quit now
+0794   DC46 C2 53 D8            JP      NZ,wboot        ; quit if user typed something
+0795   DC49 DB 03               IN      A,(CONSTAT)     ; check system serial status
+0796   DC4B FE 04               CP      4               ; bit2 (Tx empty)
+0797   DC4D CA 43 DC            JP      Z,readC         ; wait until Tx empty
+0798   DC50 DB 00               IN      A,(CTAPE)       ; read byte from cassette port
+0799   DC52 C9                  RET     
+0800   DC53             
+0801   DC53             ; reads a byte from the cassette, and adds it value to checksum in HL
+0802   DC53             ;
+0803   DC53 CD 43 DC    j81:    CALL    readC           ; get byte from cassette tape
+0804   DC56 C5                  PUSH    BC              ; temp save BC
+0805   DC57 4F                  LD      C,A             ; put value into BC
+0806   DC58 06 00               LD      B,0
+0807   DC5A 09                  ADD     HL,BC           ; add value to HL
+0808   DC5B C1                  POP     BC              ; restore BC
+0809   DC5C C9                  RET     
+0810   DC5D             
+0811   DC5D             ; Handle Adjust & Align Cassette "A" command
+0812   DC5D             ; Not much info on this command.  End by Ctrl-C from user?
+0813   DC5D             ;
+0814   DC5D CD 8A DE    cmdA:   CALL    getCh2          ; user exit with Ctrl-C
+0815   DC60 CD 79 DC            CALL    j90             ; read until sync stream
+0816   DC63 21 00 F0    j98:    LD      HL,0F000H       ; address to store cassette data
+0817   DC66 11 E1 01            LD      DE,01E1H        ; counter
+0818   DC69 1B          j97:    DEC     DE
+0819   DC6A 7A                  LD      A,D
+0820   DC6B B3                  OR      E               ; DE=0?
+0821   DC6C CA 63 DC            JP      Z,j98
+0822   DC6F 36 7F               LD      (HL),7FH        ; store 7Fh to memory
+0823   DC71 CD 43 DC            CALL    readC           ; read a byte from cassette
+0824   DC74 77                  LD      (HL),A          ; store it in memory
+0825   DC75 23                  INC     HL              ; go to next memory location
+0826   DC76 C3 69 DC            JP      j97             ; and loop
+0827   DC79             
+0828   DC79             ; routine that reads cassette until start of sync stream encountered
+0829   DC79             ;
+0830   DC79 3E 60       j90:    LD      A,60H
+0831   DC7B D3 03               OUT     (CONSTAT),A
+0832   DC7D CD 43 DC    j99:    CALL    readC           ; read byte from cassette
+0833   DC80 FE E6               CP      0E6H            ; is it sync byte E6?
+0834   DC82 C2 7D DC            JP      NZ,j99          ; if not, keep reading
+0835   DC85 3E 20               LD      A,20H
+0836   DC87 D3 03               OUT     (CONSTAT),A         
+0837   DC89 C9                  RET     
+0838   DC8A             
+0839   DC8A             ; Read two bytes from cassette and store them in HL
+0840   DC8A             ;
+0841   DC8A CD 43 DC    readHL: CALL    readC           ; read a byte from cassette
+0842   DC8D 6F                  LD      L,A             ; save it to L
+0843   DC8E CD 43 DC            CALL    readC           ; read a byte from cassette
+0844   DC91 67                  LD      H,A             ; save it to H
+0845   DC92 C9                  RET     
+0846   DC93             
+0847   DC93             ; Handle the Boot to Floppy "B" command
+0848   DC93             ;
+0849   DC93 CD B5 DE    cmdB:   CALL    crlf 
+0850   DC96 CD 7B D8            CALL    diskOK          ; check disk status (1=disk present)
+0851   DC99 3D                  DEC     A
+0852   DC9A CA A7 D8            JP      Z,bootFD        ; disk present, so boot with jump to 0000.
+0853   DC9D             
+0854   DC9D             ; Handle a floppy disk error by printing the result code
+0855   DC9D             ;
+0856   DC9D E6 F0       fdErr:  AND     0F0H            ; look at upper 4 bits of disk status
+0857   DC9F 21 B5 DC            LD      HL,str1          
+0858   DCA2 FE A0               CP      0A0H            ; if status = A0,
+0859   DCA4 CA 59 DE            JP      Z,putStr        ; print "NOT READY"
+0860   DCA7 21 BF DC            LD      HL,str2         ; otherwise,
+0861   DCAA CD 59 DE            CALL    putStr          ; print "DISK ERR"
+0862   DCAD 2A FE D0            LD      HL,(m09)        ; point to disk descriptor
+0863   DCB0 23                  INC     HL              ; result code is in 2nd byte
+0864   DCB1 7E                  LD      A,(HL)          ; get the disk error #
+0865   DCB2 C3 BF DE            JP      pHex            ; and print it
+0866   DCB5             
+0867   DCB5 4E 4F 54 20 str1:  .db "NOT READY",0
+0867   DCB9 52 45 41 44 
+0867   DCBD 59 00 
+0868   DCBF 44 49 53 4B str2:  .db "DISK ERR- ",0
+0868   DCC3 20 45 52 52 
+0868   DCC7 2D 20 00 
+0869   DCCA             
+0870   DCCA             
+0871   DCCA             ; initDD: initializes 9 bytes FDC disc descriptor at m02
+0872   DCCA             ; first byte contains command (2=read) in upper nibble and
+0873   DCCA             ; unit (1=drive0, 2=drive1, 4=drive2, 8=drive3) in lower nibble
+0874   DCCA             ;  21 00 00 00 01 00 00 00 00
+0875   DCCA             ;
+0876   DCCA 21 EC D0    initDD: LD      HL,m02+8        ; zero out a block of 9 bytes
+0877   DCCD 06 08               LD      B,8             
+0878   DCCF 2B          j03:    DEC     HL
+0879   DCD0 36 00               LD      (HL),00H       
+0880   DCD2 05                  DEC     B
+0881   DCD3 C2 CF DC            JP      NZ,j03          
+0882   DCD6 36 21               LD      (HL),21h        ; store 21h (Read Drive #0) as FDCMD
+0883   DCD8 3E 01               LD      A,1
+0884   DCDA 32 E8 D0            LD      (m02+FDSEC),A   ; store 01 (Sector 1) as FDSEC
+0885   DCDD C9                  RET     
+0886   DCDE             
+0887   DCDE             ; Handle the "N" command
+0888   DCDE             ; This command is not described in the VIO manual
+0889   DCDE             ; It lets the user change the location of the disc descriptor, normally at 0080h.
+0890   DCDE             ;
+0891   DCDE CD E0 DE    cmdN:   CALL    getHex          ; get address from user
+0892   DCE1 7C                  LD      A,H
+0893   DCE2 B5                  OR      L               ; is it zero/not entered?
+0894   DCE3 C2 E8 DC            JP      NZ,j11          ; no, use entered value
+0895   DCE6 2E 80               LD      L,80H           ; otherwise use default 0080h location.
+0896   DCE8 22 FE D0    j11:    LD      (m09),HL        ; and store value at m09
+0897   DCEB C9                  RET     
+0898   DCEC             
+0899   DCEC             ; fdExec: copy DD to its destination, then issue FDC commands to recognize DD, 
+0900   DCEC             ; execute the disk operation, and receive the result code.
+0901   DCEC             ;
+0902   DCEC 2A FE D0    fdExec: LD      HL,(m09)        ; HL = disk descriptor address
+0903   DCEF 11 E4 D0            LD      DE,m02          ; copy of disk descriptor in scratchpad
+0904   DCF2 06 07               LD      B,7             ; copies descriptor to its address               
+0905   DCF4 EB          j02:    EX      DE,HL
+0906   DCF5 7E                  LD      A,(HL)          ; get a byte
+0907   DCF6 EB                  EX      DE,HL
+0908   DCF7 77                  LD      (HL),A          ; and store it
+0909   DCF8 23                  INC     HL
+0910   DCF9 13                  INC     DE
+0911   DCFA 05                  DEC     B
+0912   DCFB C2 F4 DC            JP      NZ,j02          ; loop until done.
+0913   DCFE 3E 10               LD      A,10H           ; FDC cmd 10h = set disk descriptor
+0914   DD00 CD 73 DD            CALL    fdSend
+0915   DD03 2A FE D0            LD      HL,(m09)        ; get descriptor address, usually 0080h
+0916   DD06 7D                  LD      A,L
+0917   DD07 CD 73 DD            CALL    fdSend          ; send LSB first
+0918   DD0A 7C                  LD      A,H
+0919   DD0B CD 73 DD            CALL    fdSend          ; followed by MSB
+0920   DD0E AF                  XOR     A
+0921   DD0F CD 73 DD            CALL    fdSend          ; send cmd 0h = Disk I/0
+0922   DD12             
+0923   DD12                     ; now that a command has been sent to the controller, poll the result
+0924   DD12                     ; byte for a response.  Return as soon as a response is received, but
+0925   DD12                     ; time out after 128K attempts.
+0926   DD12              
+0927   DD12 11 00 00            LD      DE,0000         ; DE & B used as time-out counter
+0928   DD15 06 02               LD      B,2
+0929   DD17 2A FE D0            LD      HL,(m09)        ; get disk descriptor address
+0930   DD1A 23                  INC     HL              ; now point to FDC result code
+0931   DD1B 7E          j06:    LD      A,(HL)          ; get result code from FDC
+0932   DD1C B7                  OR      A               ; is it zero? 
+0933   DD1D C0                  RET     NZ              ; return when FDC returns a result
+0934   DD1E 15                  DEC     D
+0935   DD1F C2 1B DD            JP      NZ,j06          ; wait loop x 256 reads
+0936   DD22 1D                  DEC     E
+0937   DD23 C2 1B DD            JP      NZ,j06          ; wait loop x 64K
+0938   DD26 05                  DEC     B
+0939   DD27 C2 1B DD            JP      NZ,j06          ; wait loop x 128K
+0940   DD2A C9                  RET                     ; don't wait forever!
+0941   DD2B             
+0942   DD2B             ; Handle Write to Diskette "W" command
+0943   DD2B             ; call with <track>,<sector>,<buffer addr>,<Unit#>  (last 2 optional)       
+0944   DD2B             ;
+0945   DD2B CD CA DC    cmdR:   CALL    initDD          ; initialize disc descriptor with Read on Disk 0
+0946   DD2E C3 36 DD            JP      diskIO          ; do it
+0947   DD31             
+0948   DD31             ; Handle Write to Diskette "W" command
+0949   DD31             ; call with <track>,<sector>,<buffer addr>,<Unit#>  (last 2 optional)       
+0950   DD31             ;
+0951   DD31 CD CA DC    cmdW:   CALL    initDD          ; initialize disc descriptor with Read on Disk 0
+0952   DD34 36 11               LD      (HL),11H        ; change command byte to 11h = Write to Disk 0
+0953   DD36             
+0954   DD36 CD D8 DD    diskIO: CALL    getHD2          ; get track & sector
+0955   DD39 32 FD D0            LD      (m08),A         ; temp save last char
+0956   DD3C 7D                  LD      A,L
+0957   DD3D B3                  OR      E               ; was it zero/invalid?
+0958   DD3E CA 8F DD            JP      Z,j12           ; print "INVALID"
+0959   DD41 22 E7 D0            LD      (m02+FDTRK),HL  ; store first parameter as track #
+0960   DD44 7B                  LD      A,E             
+0961   DD45 32 E8 D0            LD      (m02+FDSEC),A   ; store 2nd param as sector #
+0962   DD48 3A FD D0            LD      A,(m08)         ; retrieve last char
+0963   DD4B FE 0A               CP      0AH             ; was it <enter>?
+0964   DD4D CA 6B DD            JP      Z,j13           ; use default DMA & unit
+0965   DD50 CD D8 DD            CALL    getHD2          ; otherwise get DMA in HL, unit in DE
+0966   DD53 22 E9 D0            LD      (m02+FDDMA),HL  ; store DMA buffer address
+0967   DD56             
+0968   DD56                     ; The Drive# (0-3) must be converted into a bit pattern.
+0969   DD56                     ; For drive 0, bit 0 is set, etc.
+0970   DD56             
+0971   DD56 7B                  LD      A,E             ; get unit #
+0972   DD57 E6 03               AND     03H             ; mask to 0-3
+0973   DD59 3C                  INC     A               ; convert 0-3 to 1-4
+0974   DD5A 5F                  LD      E,A             ; use this as a rotation counter
+0975   DD5B AF                  XOR     A
+0976   DD5C 37                  SCF                     ; start with A=0 plus carry set
+0977   DD5D 17          j14:    RLA                     ; rotate carry to bit0 
+0978   DD5E 1D                  DEC     E
+0979   DD5F C2 5D DD            JP      NZ,j14          ; set drive bit by rotating
+0980   DD62             
+0981   DD62                     ; The first byte in the disc descriptor contains the disk command & unit info.
+0982   DD62                     ; the upper 4 bits are the command and the lower 4 bits are the unit.
+0983   DD62                     ; add the new drive info to the existing command byte 
+0984   DD62             
+0985   DD62 5F                  LD      E,A             ; copy drive info to E
+0986   DD63 21 E4 D0            LD      HL,m02+FDCMD    ; address for command/unit byte
+0987   DD66 7E                  LD      A,(HL)          ; get old drive command/unit value
+0988   DD67 E6 F0               AND     0F0H            ; mask out unit
+0989   DD69 B3                  OR      E               ; add in new unit
+0990   DD6A 77                  LD      (HL),A          ; and save new command/unit 
+0991   DD6B             
+0992   DD6B                     ; Now the disc descriptor contains the command &  user input parameters
+0993   DD6B             
+0994   DD6B CD EC DC    j13:    CALL    fdExec          ; send command to FC controller & get result
+0995   DD6E 3D                  DEC     A               ; was result code 1=success?
+0996   DD6F C8                  RET     Z               ; return if so with A=0
+0997   DD70 C3 9D DC            JP      fdErr           ; otherwise print the disk error code
+0998   DD73             
+0999   DD73             ; fdSend: send a byte to the Floppy Disk Controller
+1000   DD73             ;
+1001   DD73 32 FD D0    fdSend: LD      (m08),A         ; temp store byte to send
+1002   DD76 3A F5 D0            LD      A,(m03)         ; get controller type
+1003   DD79 FE 04               CP      04H             ; is it type 4?
+1004   DD7B C2 84 DD            JP      NZ,j19          ; if not, jump below
+1005   DD7E 3A FD D0            LD      A,(m08)         ; get FDC command in m08 
+1006   DD81 D3 FD               OUT     (FDC),A         ; and sent it to floppy disk (FIF) controller
+1007   DD83 C9                  RET     
+1008   DD84             
+1009   DD84 FE 02       j19:    CP      02H             ; is it type 2 controller?
+1010   DD86 3A FD D0            LD      A,(m08)         ; get FDC command in m08 
+1011   DD89 CA 06 E0            JP      Z,DIOEXEC1      ; yes, jump to controller addr
+1012   DD8C C3 09 E0            JP      DIOEXEC2        ; no, jump to this one instead
+1013   DD8F             
+1014   DD8F 21 95 DD    j12:    LD      HL,str3
+1015   DD92 C3 59 DE            JP      putStr          ; print "INVALID"
+1016   DD95             
+1017   DD95 49 4E 56 41 str3:  .db "INVALID",0
+1017   DD99 4C 49 44 00 
+1018   DD9D             
+1019   DD9D 21 F5 D0    cmdD2:  LD      HL,m03          ; show FD type and allow user to change it
+1020   DDA0 C3 E0 D9            JP      mod8 
+1021   DDA3             
+1022   DDA3 21 F6 D0    cmdI2:  LD      HL,m04          ; show input device & allow user to change
+1023   DDA6 C3 E0 D9            JP      mod8 
+1024   DDA9             
+1025   DDA9 21 F7 D0    cmdO2:  LD      HL,m05          ; show output device & allow user to change
+1026   DDAC C3 E0 D9            JP      mod8 
+1027   DDAF             
+1028   DDAF             ; Param2 gets <start address> in HL and <end address> in DE
+1029   DDAF             ; Then calculates the number of bytes between them as BC = ED - HL + 1
+1030   DDAF             ;        
+1031   DDAF CD BC DD    param2: CALL    getHD           ; get up to 2 parameters in HL, DE
+1032   DDB2 F5                  PUSH    AF              ; save A
+1033   DDB3 7B                  LD      A,E             ; do 16-bit math (BC=ED-HL) as two 8-bit ops
+1034   DDB4 95                  SUB     L
+1035   DDB5 4F                  LD      C,A             ; now C = E-L
+1036   DDB6 7A                  LD      A,D
+1037   DDB7 9C                  SBC     A,H
+1038   DDB8 47                  LD      B,A             ; now B = D-H
+1039   DDB9 03                  INC     BC              ; add one to count
+1040   DDBA F1                  POP     AF              ; restore A
+1041   DDBB C9                  RET     
+1042   DDBC             
+1043   DDBC             ; getHD gets start and end addresses from the user, which can be separated
+1044   DDBC             ; by either a comma or space, and puts results into HL and DE.
+1045   DDBC             ;
+1046   DDBC CD E0 DE    getHD:  CALL    getHex          ; get first parameter in HL
+1047   DDBF 54                  LD      D,H             ; copy HL to DE
+1048   DDC0 5D                  LD      E,L
+1049   DDC1 FE 0A       j08:    CP      0AH             ; was input just <enter>?
+1050   DDC3 C8                  RET     Z               ; return if so
+1051   DDC4 FE 20               CP      20H             ; was last char a space?
+1052   DDC6 CA CC DD            JP      Z,j16           
+1053   DDC9 FE 2C               CP      ','             ; was last char a comma?
+1054   DDCB C0                  RET     NZ              
+1055   DDCC EB          j16:    EX      DE,HL           ; if space or comma then
+1056   DDCD CD E0 DE            CALL    getHex          ; get second hex input
+1057   DDD0 EB                  EX      DE,HL           ; 1st input in HL, 2nd in DE
+1058   DDD1 C9                  RET     
+1059   DDD2             
+1060   DDD2             ; Param3 gets three parameters from user: start address, end address, and X.
+1061   DDD2             ; At the end, HL contains start address, DE contains X, and BC contains byte count.
+1062   DDD2             ;
+1063   DDD2 CD AF DD    param3: CALL    param2          ; get start addr in HL and count in BC
+1064   DDD5 C3 CC DD            JP      j16             ; get 3rd parameter in DE
+1065   DDD8             
+1066   DDD8             ;getHD2 is like getHD, with second optional parameter in DE.
+1067   DDD8             ;
+1068   DDD8 CD E0 DE    getHD2: CALL    getHex          ; get 1st parameter in HL
+1069   DDDB 11 00 00            LD      DE,0000         ; init DE
+1070   DDDE C3 C1 DD            JP      j08             ; if 2nd parameter given, put in DE
+1071   DDE1             
+1072   DDE1             
+1073   DDE1             ; Lookup searches the command table
+1074   DDE1             ; call with A = command that is being searched for
+1075   DDE1             ; on return, zero flag set if not found
+1076   DDE1             ; otherwise, HL contains the command address
+1077   DDE1             ;
+1078   DDE1 47          lookup: LD      B,A             ; save entered command in B
+1079   DDE2 7E          j36:    LD      A,(HL)          ; get next command from table
+1080   DDE3 B7                  OR      A               ; 0 = end of table
+1081   DDE4 C8                  RET     Z               ; quit if command not found
+1082   DDE5 B8                  CP      B               ; command match?
+1083   DDE6 23                  INC     HL              ; point to addr LSB
+1084   DDE7 CA EF DD            JP      Z,j35           ; jump if found
+1085   DDEA 23                  INC     HL              ; point to next table entry
+1086   DDEB 23                  INC     HL  
+1087   DDEC C3 E2 DD            JP      j36             ; and keep searching
+1088   DDEF 46          j35:    LD      B,(HL)          ; get LSB
+1089   DDF0 23                  INC     HL              ; point to add MSB
+1090   DDF1 66                  LD      H,(HL)          ; load MSB into H
+1091   DDF2 68                  LD      L,B             ; load LSB into L
+1092   DDF3 B7                  OR      A               ; clear Z flag
+1093   DDF4 C9                  RET     
+1094   DDF5             
+1095   DDF5             ; SERIAL PORT (12/13) INPUT 
+1096   DDF5 DB 13       serIn:  IN      A,(13H)         ; check status port 13h
+1097   DDF7 E6 02               AND     02H             ; look at ready bit
+1098   DDF9 C8                  RET     Z               ; return if not ready
+1099   DDFA DB 12               IN      A,(12H)         ; ready, so get char from port 12h
+1100   DDFC C9                  RET     
+1101   DDFD             
+1102   DDFD             ; SYSTEM SERIAL PORT (2/3) INPUT 
+1103   DDFD DB 03       sysIn:  IN      A,(CONSTAT)     ; check status port
+1104   DDFF E6 02               AND     02H             ; look only at bit 1
+1105   DE01 C8                  RET     Z               ; return if not ready
+1106   DE02 DB 02               IN      A,(CONIO)       ; ready, so get char from port 2
+1107   DE04 C9                  RET     
+1108   DE05             
+1109   DE05             ; PARALLEL PORT (14/15) INPUT
+1110   DE05 DB 15       parIn:  IN      A,(15H)         ; get status byte from port 15h
+1111   DE07 E6 02               AND     02h             ; look only at bit 1
+1112   DE09 C8                  RET     Z               ; not ready
+1113   DE0A DB 14               IN      A,(14H)         ; read byte from port 14h
+1114   DE0C C9                  RET     
+1115   DE0D             
+1116   DE0D             ; SERIAL PORT (12/13) OUTPUT 
+1117   DE0D DB 13       serOut: IN      A,(13H)         ; get status byte
+1118   DE0F E6 01               AND     01H             ; look only at bit 1
+1119   DE11 CA 0D DE            JP      Z,serOut        ; not ready
+1120   DE14 3A FD D0            LD      A,(m08)         ; load byte from memory
+1121   DE17 D3 12               OUT     (12H),A         ; and send it to port 12h
+1122   DE19 C9                  RET     
+1123   DE1A             
+1124   DE1A             ; SYSTEM SERIAL PORT (2/3) OUTPUT 
+1125   DE1A DB 03       sysOut: IN      A,(CONSTAT)     ; check status byte
+1126   DE1C E6 01               AND     01H             ; look only at bit 0
+1127   DE1E CA 1A DE            JP      Z,sysOut        ; not ready
+1128   DE21 3A FD D0            LD      A,(m08)         ; load byte from memory
+1129   DE24 D3 02               OUT     (CONIO),A       ; and send it to port 2
+1130   DE26 C9                  RET     
+1131   DE27             
+1132   DE27             ; PARALLEL IN/ SYSTEM SERIAL OUT
+1133   DE27 DB 15       piso:   IN      A,(15H)         ; check parallel (kbd) status
+1134   DE29 E6 01               AND     01H             ; look at only bit 0
+1135   DE2B CA 27 DE            JP      Z,piso          ; not ready
+1136   DE2E 3A FD D0            LD      A,(m08)         ; get char to output
+1137   DE31 D3 02               OUT     (CONIO),A       ; and send to port 2
+1138   DE33 C9                  RET     
+1139   DE34             
+1140   DE34             ; getCh1 waits for a character, looking at all input devices
+1141   DE34             ;
+1142   DE34 CD 3B DE    getCh1: CALL    getCh           ; look for character at input(s)
+1143   DE37 CA 34 DE            JP      Z,getCh1        ; wait until char is received
+1144   DE3A C9                  RET     
+1145   DE3B             
+1146   DE3B             ; getCh looks for character input from all input devices
+1147   DE3B             ; and returns with char in A, if found.  
+1148   DE3B             ; Zero flag is set if no devices have input
+1149   DE3B             ;
+1150   DE3B 3A F6 D0    getCh:  LD      A,(m04)         ; m04 contains input device list
+1151   DE3E E6 02               AND     02H             ; if bit 1 set,
+1152   DE40 C4 05 DE            CALL    NZ,parIn        ; look for parallel (kbd) input
+1153   DE43 C0                  RET     NZ              ; return if char received
+1154   DE44 3A F6 D0            LD      A,(m04)         
+1155   DE47 E6 04               AND     04H             ; if bit 2 set,
+1156   DE49 C4 FD DD            CALL    NZ,sysIn        ; look at system ports 2/3
+1157   DE4C C0                  RET     NZ              ; return if char received
+1158   DE4D 3A F6 D0            LD      A,(m04)
+1159   DE50 E6 01               AND     01H             ; if bit 0 set,
+1160   DE52 C4 F5 DD            CALL    NZ,serIn        ; look at serial port 12/13h
+1161   DE55 C9                  RET                     
+1162   DE56             
+1163   DE56 CD B5 DE            CALL    crlf            ; nice idea before putStr, but never used!
+1164   DE59             
+1165   DE59             ; putStr write a null-terminated ASCII string, pointed to by HL, 
+1166   DE59             ; to all output devices.
+1167   DE59             ;
+1168   DE59 7E          putStr: LD      A,(HL)          ; load next char in string      
+1169   DE5A B7                  OR      A               ; is it end-of-string NULL?
+1170   DE5B C8                  RET     Z               ; if so, we are done
+1171   DE5C C5                  PUSH    BC              ; save BC (why? video driver?)
+1172   DE5D 47                  LD      B,A             ; save char in B (video driver?)
+1173   DE5E CD 66 DE            CALL    putCh           ; send char to output devices
+1174   DE61 C1                  POP     BC              ; restore BC
+1175   DE62 23                  INC     HL              ; point to next character in string
+1176   DE63 C3 59 DE            JP      putStr          ; and loop until done
+1177   DE66             
+1178   DE66             ; putCh outputs a character in A to the designated output device(s), according to
+1179   DE66             ; the device list found at m05
+1180   DE66             ;
+1181   DE66 32 FD D0    putCh:  LD      (m08),A         ; save character to send out
+1182   DE69 E5                  PUSH    HL
+1183   DE6A 21 F7 D0            LD      HL,m05              
+1184   DE6D 7E                  LD      A,(HL)          ; get output device list
+1185   DE6E E6 01               AND     01H             ; if bit 0 set, 
+1186   DE70 C4 0D DE            CALL    NZ,serOut       ; send byte to serial port 12h
+1187   DE73 7E                  LD      A,(HL)
+1188   DE74 E6 02               AND     02H             ; if bit 1 set,
+1189   DE76 C4 27 DE            CALL    NZ,piso         ; send byte to kbd/sys console
+1190   DE79 7E                  LD      A,(HL)
+1191   DE7A E6 04               AND     04H             ; if bit 2 set,
+1192   DE7C C4 1A DE            CALL    NZ,sysOut       ; send byte to system port 02h
+1193   DE7F 7E                  LD      A,(HL)
+1194   DE80 E6 10               AND     10H             ; if bit 4 set,
+1195   DE82 3A FD D0            LD      A,(m08)
+1196   DE85 C4 03 F8            CALL    NZ,VIOOUT       ; send byte to video driver
+1197   DE88 E1                  POP     HL
+1198   DE89 C9                  RET     
+1199   DE8A             
+1200   DE8A             ; getCh2 waits for a character, returning its upper-case value in A
+1201   DE8A             ; Special characters like <Enter>, <Esc>, Ctrl-C, Ctrl-Z are processed. 
+1202   DE8A             ;
+1203   DE8A CD 34 DE    getCh2: CALL    getCh1          ; wait for character input
+1204   DE8D E6 7F               AND     7FH             ; strip off MSb (7-bit ASCII only)
+1205   DE8F FE 0D               CP      0DH             ; is it <Enter>?
+1206   DE91 CA B5 DE            JP      Z,crlf          ; if echo <CR><LF> to output devices
+1207   DE94 FE 03               CP      03H             ; is it Ctrl-C?
+1208   DE96 CA 53 D8            JP      Z,wboot         ; yes, do a warm boot
+1209   DE99 FE 15               CP      15H             ; is it Ctrl-Z?
+1210   DE9B CA 53 D8            JP      Z,wboot         ; yes, do a warm boot
+1211   DE9E CD 66 DE            CALL    putCh           ; echo character to output devices
+1212   DEA1 FE 1B               CP      1BH             ; is it <Esc>?
+1213   DEA3 C2 AC DE            JP      NZ,j23          ; no, continue eval below
+1214   DEA6 CD 8A DE            CALL    getCh2          ; get 2nd char in escape sequence
+1215   DEA9 C3 8A DE            JP      getCh2 
+1216   DEAC FE 61       j23:    CP      61H             ; is character upper case?
+1217   DEAE D8                  RET     C               ; no, so return with it in A
+1218   DEAF FE 7B               CP      7BH             
+1219   DEB1 D0                  RET     NC
+1220   DEB2 EE 20               XOR     20H             ; convert input to upper case
+1221   DEB4 C9                  RET     
+1222   DEB5             
+1223   DEB5             ; crlf issues a two byte carriage return/line feed combo to output devices
+1224   DEB5             ; 
+1225   DEB5 3E 0D       crlf:   LD      A,0DH
+1226   DEB7 CD 66 DE            CALL    putCh           ; output CR
+1227   DEBA 3E 0A               LD      A,0AH
+1228   DEBC C3 66 DE            JP      putCh           ; output LF
+1229   DEBF             
+1230   DEBF             ; pHex prints the byte in A as a two-digit hexadecimal
+1231   DEBF             ; for example, value 0A8h is printed as two ASCII characters "A8"
+1232   DEBF             ;
+1233   DEBF F5          pHex:   PUSH    AF              ; save value
+1234   DEC0 0F                  RRCA                    ; rotate first digit into lower 4 bits
+1235   DEC1 0F                  RRCA    
+1236   DEC2 0F                  RRCA    
+1237   DEC3 0F                  RRCA    
+1238   DEC4 CD C8 DE            CALL    j24             ; convert first digit to ASCII
+1239   DEC7 F1                  POP     AF              ; restore value & continue with 2nd digit
+1240   DEC8 E6 0F       j24:    AND     0FH             ; consider only lower 4 bits
+1241   DECA C6 90               ADD     A,90H           ; convert value to ASCII
+1242   DECC 27                  DAA                     ; via clever textbook routine
+1243   DECD CE 40               ADC     A,40H
+1244   DECF 27                  DAA     
+1245   DED0 C3 66 DE            JP      putCh           ; output ASCII character
+1246   DED3             
+1247   DED3             ; pHex16 prints the word in HL as a four-digit hexadecimal, followed by a space
+1248   DED3             ; for example, value 0A8EEh is printed as two ASCII characters "A8EE "
+1249   DED3             ;
+1250   DED3 7C          pHex16: LD      A,H             ; get MSB
+1251   DED4 CD BF DE            CALL    pHex            ; and output ASCII for it
+1252   DED7 7D                  LD      A,L             ; then get LSB
+1253   DED8 CD BF DE    pHexSp: CALL    pHex            ; and output ASCII for it
+1254   DEDB 3E 20       space:  LD      A,20H           
+1255   DEDD C3 66 DE            JP      putCh           ; print a space
+1256   DEE0             
+1257   DEE0             ; getHex reads hexadecimal characters from the console and stops when a
+1258   DEE0             ; non-hex digit is encountered.  The input could be any number of characters.
+1259   DEE0             ; On exit, HL contains the value of the entered value, and A contains non-hex char
+1260   DEE0             ; that stopped the routine.  
+1261   DEE0             ;
+1262   DEE0 21 00 00    getHex: LD      HL,0000         ; get console input into HL, default 0
+1263   DEE3 CD 8A DE    j39:    CALL    getCh2          ; get next character with processing
+1264   DEE6 F5                  PUSH    AF              ; save entered character
+1265   DEE7 CD F9 DE            CALL    isHex           ; is char a hex digit?
+1266   DEEA D2 EF DE            JP      NC,j22          ; process it if yes
+1267   DEED F1                  POP     AF              ; restore entered char in A
+1268   DEEE C9                  RET                     ; return on first non-hex input
+1269   DEEF             
+1270   DEEF 29          j22:    ADD     HL,HL           ; HL x 16 (shift it left one digit)
+1271   DEF0 29                  ADD     HL,HL           ; x 4
+1272   DEF1 29                  ADD     HL,HL           ; x 8
+1273   DEF2 29                  ADD     HL,HL           ; x 16
+1274   DEF3 85                  ADD     A,L         
+1275   DEF4 6F                  LD      L,A             ; after left-shift, add new digit in A
+1276   DEF5 F1                  POP     AF
+1277   DEF6 C3 E3 DE            JP      j39             ; continue until non-hex input found
+1278   DEF9             
+1279   DEF9             ; isHex returned carry cleared for ASCII characters (A-F,0-9), but set otherwise
+1280   DEF9             ; On exit, A contains value of the character.  For example, reg A=0Ah for "A" input
+1281   DEF9             ;
+1282   DEF9 D6 30       isHex:  SUB     30H             ; is it a control/special char? 
+1283   DEFB D8                  RET     C               ; yes, return with carry set
+1284   DEFC FE 0A               CP      0AH             ; is it a numeric digit?
+1285   DEFE DA 08 DF            JP      C,j26           ; yes, return with carry clear 
+1286   DF01 D6 11               SUB     11H             ; is it ':' thru '@'?
+1287   DF03 D8                  RET     C               ; yes, return with carry set
+1288   DF04 C6 0A               ADD     A,0AH           ; convert A->10h; B->11h; etc.
+1289   DF06 FE 10               CP      10H             ; set carry for A-F
+1290   DF08 3F          j26:    CCF                     ; clears carry for A-F
+1291   DF09 C9                  RET     
+1292   DF0A             
+1293   DF0A             ; show AW displays an address (HL-1) and its word contents
+1294   DF0A             ;
+1295   DF0A CD 12 DF    showAW: CALL    showAB          ; display address (HL-1) & its byte contents
+1296   DF0D 7E                  LD      A,(HL)
+1297   DF0E CD BF DE    j64:    CALL    pHex            ; and also contents at next address
+1298   DF11 C9                  RET     
+1299   DF12             
+1300   DF12             ; showAB displays an address (HL-1) and its byte contents
+1301   DF12             ;
+1302   DF12 CD B5 DE    showAB: CALL    crlf            ; new line
+1303   DF15 2B          j71:    DEC     HL
+1304   DF16 CD D3 DE            CALL    pHex16          ; display an address (HL-1)
+1305   DF19 7E                  LD      A,(HL)
+1306   DF1A CD D8 DE            CALL    pHexSp          ; and its contents, followed by space
+1307   DF1D 23                  INC     HL
+1308   DF1E C9                  RET     
+1309   DF1F             
+1310   DF1F             ;  Baud Table #1: timing values and associated baud rates
+1311   DF1F             ;  used for automatic baud rate determination
+1312   DF1F             ;
+1313   DF1F 03 96       baudT1: .db  03h, 96h           ; 9600 baud
+1314   DF21 06 48               .db  06h, 48h           ; 4800 baud
+1315   DF23 0B 24               .db  0Bh, 24h           ; 2400 baud
+1316   DF25 17 12               .db  17h, 12h           ; 1200 baud
+1317   DF27 2E 06               .db  2Eh, 06h           ; 600 baud
+1318   DF29 5E 03               .db  5Eh, 03h           ; 300 baud
+1319   DF2B FF 01               .db 0FFh, 01h           ; 110 baud
+1320   DF2D 00                  .db 00h
+1321   DF2E             
+1322   DF2E             ; Baud Table #2: rates "96"=9600, etc and their associated timer0 
+1323   DF2E             ; count values, which are calculated as count = 2000000/(16*baud)
+1324   DF2E             ;
+1325   DF2E 96          baudT2: .db 96h \ .dw 000Dh     ; 9600 baud
+1325   DF2F 0D 00       
+1326   DF31 01                  .db 01h \ .dw 0470h     ;  110 baud
+1326   DF32 70 04       
+1327   DF34 03                  .db 03h \ .dw 01A0h     ;  300 baud
+1327   DF35 A0 01       
+1328   DF37 48                  .db 48h \ .dw 001Ah     ; 4800 baud
+1328   DF38 1A 00       
+1329   DF3A 24                  .db 24h \ .dw 0034h     ; 2400 baud
+1329   DF3B 34 00       
+1330   DF3D 12                  .db 12h \ .dw 0068h     ; 1200 baud
+1330   DF3E 68 00       
+1331   DF40 06                  .db 06h \ .dw 00D0h     ;  600 baud
+1331   DF41 D0 00       
+1332   DF43 00                  .db 00h  
+1333   DF44             
+1334   DF44             ; Table of Monitor commands and their jump vectors:
+1335   DF44             ;     
+1336   DF44 41          cmdTbl: .db 'A' \ .dw cmdA      ; Align cassette recorder
+1336   DF45 5D DC       
+1337   DF47 42                  .db 'B' \ .dw cmdB      ; Boot from Floppy Disk
+1337   DF48 93 DC       
+1338   DF4A 43                  .db 'C' \ .dw cmdC      ; Call routine in memory
+1338   DF4B AD D9       
+1339   DF4D 44                  .db 'D' \ .dw cmdD      ; Display memory
+1339   DF4E EC D9       
+1340   DF50 45                  .db 'E' \ .dw cmdE      ; Examine & modify memory
+1340   DF51 C6 D9       
+1341   DF53 46                  .db 'F' \ .dw cmdF      ; Fill memory
+1341   DF54 DD DA       
+1342   DF56 47                  .db 'G' \ .dw cmdG      ; Generate Sync stream
+1342   DF57 2F DC       
+1343   DF59 48                  .db 'H' \ .dw cmdH      ; Load Intel Hex tape
+1343   DF5A 69 DA       
+1344   DF5C 49                  .db 'I' \ .dw cmdI      ; Port Input
+1344   DF5D E9 DA       
+1345   DF5F 4A                  .db 'J' \ .dw cmdJ      ; Jump to Memory
+1345   DF60 AC D9       
+1346   DF62 4B                  .db 'K' \ .dw cmdK      ; Kill ROM and Jump
+1346   DF63 B1 D9       
+1347   DF65 4C                  .db 'L' \ .dw cmdL      ; Load Cassette file
+1347   DF66 6A DB       
+1348   DF68 4D                  .db 'M' \ .dw cmdM      ; Copy Memory
+1348   DF69 D7 DA       
+1349   DF6B 4E                  .db 'N' \ .dw cmdN      ; same as cmdK
+1349   DF6C DE DC       
+1350   DF6E 4F                  .db 'O' \ .dw cmdO      ; Port Output
+1350   DF6F EA DA       
+1351   DF71 50                  .db 'P' \ .dw cmdP      ; Protect Memory
+1351   DF72 53 DA       
+1352   DF74 51                  .db 'Q' \ .dw cmdQ      ; Switch-off ROM and Jump to VIO monitor
+1352   DF75 B9 D9       
+1353   DF77 52                  .db 'R' \ .dw cmdR      ; Read from Diskette
+1353   DF78 2B DD       
+1354   DF7A 53                  .db 'S' \ .dw cmdS      ; Search memory
+1354   DF7B 38 DB       
+1355   DF7D 54                  .db 'T' \ .dw cmdT      ; Test memory
+1355   DF7E B2 DA       
+1356   DF80 55                  .db 'U' \ .dw cmdU      ; Unprotect memory
+1356   DF81 54 DA       
+1357   DF83 56                  .db 'V' \ .dw cmdV      ; Verify Memory
+1357   DF84 1B DB       
+1358   DF86 57                  .db 'W' \ .dw cmdW      ; Write to Diskette
+1358   DF87 31 DD       
+1359   DF89 58                  .db 'X' \ .dw cmdX      ; Execute cassette file
+1359   DF8A 69 DB       
+1360   DF8C 59                  .db 'Y' \ .dw cmdY      ; Change Direct I/O address
+1360   DF8D 0C DB       
+1361   DF8F 5A                  .db 'Z' \ .dw cmdZ      ; Set baud rate
+1361   DF90 83 D9       
+1362   DF92 3A                  .db ':' \ .dw cmd2      ; secondary commands follow
+1362   DF93 75 D8       
+1363   DF95 44          cmdTbl2:.db 'D' \ .dw cmdD2     ; change FD drive type
+1363   DF96 9D DD       
+1364   DF98 49                  .db 'I' \ .dw cmdI2     ; change char input device
+1364   DF99 A3 DD       
+1365   DF9B 4F                  .db 'O' \ .dw cmdO2     ; change char output device
+1365   DF9C A9 DD       
+1366   DF9E 00                  .db 00                  ; end of table marker   
+1367   DF9F             
+1368   DF9F 28 43 29 31         .db "(C)1978 "
+1368   DFA3 39 37 38 20 
+1369   DFA7 49 4D 53 41 str4:   .db "IMSAI MPU-B MONITOR    VERS 1.3",0
+1369   DFAB 49 20 4D 50 
+1369   DFAF 55 2D 42 20 
+1369   DFB3 4D 4F 4E 49 
+1369   DFB7 54 4F 52 20 
+1369   DFBB 20 20 20 56 
+1369   DFBF 45 52 53 20 
+1369   DFC3 31 2E 33 00 
+1370   DFC7 48 49 54 20 str5:   .db "HIT SPACE BAR",13,10,0
+1370   DFCB 53 50 41 43 
+1370   DFCF 45 20 42 41 
+1370   DFD3 52 0D 0A 00 
+1371   DFD7 49 4E 56 41 str6:   .db "INVALID BAUD",0
+1371   DFDB 4C 49 44 20 
+1371   DFDF 42 41 55 44 
+1371   DFE3 00 
+1372   DFE4 42 41 55 44 str7:   .db "BAUD SERIAL",13,10,0
+1372   DFE8 20 53 45 52 
+1372   DFEC 49 41 4C 0D 
+1372   DFF0 0A 00 
+1373   DFF2 50 41 52 41 str8:   .db "PARALLEL",13,10,0
+1373   DFF6 4C 4C 45 4C 
+1373   DFFA 0D 0A 00 
+1374   DFFD 00 42 23            .db 0, 42h, 23h
+1375   E000             .ENDtasm: Number of errors = 0

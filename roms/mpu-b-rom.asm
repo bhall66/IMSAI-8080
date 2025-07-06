@@ -1,7 +1,7 @@
 ;
 ;   Title:   mpu-b-rom.asm
 ;  Author:   Bruce E. Hall, w8bh
-;    Date:   04 Jul 2025
+;    Date:   06 Jul 2025
 ;      HW:   IMSAI8080 emulator by TheHighNibble
 ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
 ;            
@@ -29,7 +29,7 @@ FDDMA      .EQU  5              ; offset for floppy disk DMA buffer address
 
 MPAGE      .EQU  0D000h         ; memory (for variables) base address
 m02        .EQU  MPAGE + 0E4h   ; scrachpad area, also monitor stack start
-m03        .EQU  MPAGE + 0F5h   ; video driver init stuff
+m03        .EQU  MPAGE + 0F5h   ; FD driver type (1=DIO MINI, 2=DIO STD, 4=FIF)
 m04        .EQU  MPAGE + 0F6h   ; input devices (1=UART,2=PARALLEL,4=SYSTEM SERIAL)
 m05        .EQU  MPAGE + 0F7h   ; output devices (1=UART,2=PARALLEL,4=SYSTEM SERIAL)
 m06        .EQU  MPAGE + 0F8h   ; contains address where direct I/O is done
@@ -46,8 +46,8 @@ VIOSIG     .EQU  VIOPAGE + 7FDh ; VIO firmware signature "VIO"
 DIOPAGE    .EQU  0E000h         ; DIO disc controller base address
 DIOINIT    .EQU  DIOPAGE + 0Ch  ; DIO initialization address
 DIOSIG     .EQU  DIOPAGE + 7FDh ; DIO firmware signature "DIO"
-DIOEXEC1   .EQU  DIOPAGE + 06h  ; DIO execution address 
-DIOEXEC2   .EQU  DIOPAGE + 09h  ; DIO execution address 
+DIOEXEC1   .EQU  DIOPAGE + 06h  ; DIO execution address for std 8" disk
+DIOEXEC2   .EQU  DIOPAGE + 09h  ; DIO execution address for mini 5.25" disk
 
 TIMER0     .EQU  0D100h         ; timer0 address
 TIMCTRL    .EQU  0D103h         ; timer control register
@@ -108,7 +108,7 @@ cmd2:   LD      HL,cmdTbl2      ; point to start of 2nd command table
         JP      j15             ; return to main program loop
 
 diskOK: CALL    initDD          ; create a disk descriptor
-        LD      HL,m03
+        LD      HL,m03          
         LD      A,(DIOSIG)      ; load signature byte 1
         SUB     44H             ; is it a 'D'?
         JP      NZ,j17          ; jump if no
@@ -1346,7 +1346,7 @@ cmdTbl: .db 'A' \ .dw cmdA      ; Align cassette recorder
         .db 'K' \ .dw cmdK      ; Kill ROM and Jump
         .db 'L' \ .dw cmdL      ; Load Cassette file
         .db 'M' \ .dw cmdM      ; Copy Memory
-        .db 'N' \ .dw cmdN      ; Change disc descriptor address
+        .db 'N' \ .dw cmdN      ; Change disk descriptor address
         .db 'O' \ .dw cmdO      ; Port Output
         .db 'P' \ .dw cmdP      ; Protect Memory
         .db 'Q' \ .dw cmdQ      ; Switch-off ROM and Jump to VIO monitor

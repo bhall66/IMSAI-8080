@@ -1,7 +1,7 @@
 ;
 ;   Title:   mpu-a-rom.asm
 ;  Author:   Bruce E. Hall, w8bh
-;    Date:   04 Jul 2025
+;    Date:   06 Jul 2025
 ;      HW:   IMSAI8080 emulator by TheHighNibble
 ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
 ;            
@@ -28,7 +28,7 @@ FDDMA      .EQU  5              ; offset for floppy disk DMA buffer address
 
 MPAGE      .EQU  0A800h         ; base address for memory (variables)
 m01        .EQU  MPAGE + 0E3h   ; scrachpad used for ASCII dump & disk descriptor
-m02        .EQU  MPAGE + 0F4h   ; Floppy controller type (1, 2, or 4)
+m02        .EQU  MPAGE + 0F4h   ; Disk controller type (1=DIO 5.25", 2=DIO 8", 4=FIF)
 m03        .EQU  MPAGE + 0F5h   ; video driver init stuff
 m04        .EQU  MPAGE + 0F6h   ; input devices (1=UART,2=PARALLEL,4=SYSTEM SERIAL)
 m05        .EQU  MPAGE + 0F7h   ; output devices (1=UART,2=PARALLEL,4=SYSTEM SERIAL)
@@ -829,6 +829,7 @@ fdSend: LD   (m08),A            ; temp store byte to send
         LD   A,(m08)            ; restore byte back into A
         RET                     ; jump to controller address
 
+; Table of floppy disk controller (DIO) entry points
 fddat:  .dw 0F009h, 0E009h, 0F006h, 0E006h       
 
 ; This is the only call to the FDC port
@@ -1186,7 +1187,7 @@ cmdTbl: .db 'B' \ .dw cmdB      ; Boot from Floppy Disk
         .db 'J' \ .dw cmdJ      ; Jump to Memory
         .db 'K' \ .dw cmdK      ; Kill ROM and Jump
         .db 'M' \ .dw cmdM      ; Copy Memory
-        .db 'N' \ .dw cmdN      ; Change disc descriptor address
+        .db 'N' \ .dw cmdN      ; Change disk descriptor address
         .db 'O' \ .dw cmdO      ; Port Output
         .db 'Q' \ .dw cmdQ      ; Switch-off ROM and Jump to VIO monitor
         .db 'R' \ .dw cmdR      ; Read from Diskette

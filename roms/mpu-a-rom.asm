@@ -1,7 +1,7 @@
 ;
 ;   Title:   mpu-a-rom.asm
 ;  Author:   Bruce E. Hall, w8bh
-;    Date:   06 Jul 2025
+;    Date:   07 Jul 2025
 ;      HW:   IMSAI8080 emulator by TheHighNibble
 ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
 ;            
@@ -16,7 +16,7 @@
 
 CONIO      .EQU  2              ; console I/O
 CONSTAT    .EQU  3              ; console status
-MMU        .EQU  0F3h           ; memory management unit port
+MBC        .EQU  0F3h           ; MPU-B control (ROM banking) port
 FDC        .EQU  0FDh           ; floppy disk controller port
 WP         .EQU  0FEh           ; memory write protect port
 
@@ -50,7 +50,7 @@ TIMCTRL    .EQU  0D103h         ; timer control register
     .ORG    0D800H
 
         LD   A,40H
-        OUT  (MMU),A            ; turn off ROM at 0000-07FF
+        OUT  (MBC),A            ; turn off ROM at 0000-07FF
         JP   j01                ; jump vector for start
         JP   getCh              ; jump vector for getCh
         JP   putCh              ; jump vector for putCh
@@ -145,7 +145,7 @@ j23:    LD   (HL),2             ; store controller type "2"
         JP   fdExec             ; execute the FD command
 
 bootFD: LD   A,0C0h             
-        OUT  (MMU),A            ; remove ROM from memory map
+        OUT  (MBC),A            ; remove ROM from memory map
         JP   0000h              ; cold boot time!
 
 ; testIO will test for the presence of I/O ports, and determine the proper baud rate
@@ -325,7 +325,7 @@ cmdC:   CALL getHex             ; get address from user
 ;
 cmdK:   CALL getHex             ; get address from user
         LD   A,0C0h
-        OUT  (MMU),A            ; remove ROM from memory map
+        OUT  (MBC),A            ; remove ROM from memory map
         JP   (HL)               ; and jump to (HL)!
 
 ; Handle the Kill ROM & quit to VIO "Q" command
@@ -339,7 +339,7 @@ cmdQ:   LD   A,(m05)            ; look at output locations
         LD   A,0FFh             ; if yes, fiddle with WP first
         OUT  (WP),A 
 j49:    LD   A,0C0h             
-        OUT  (MMU),A            ; remove ROM from memory map 
+        OUT  (MBC),A            ; remove ROM from memory map 
         JP   VIOSTART           ; and jump to video driver
 
 ; Handle the Examine memory "E" command

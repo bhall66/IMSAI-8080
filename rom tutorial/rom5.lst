@@ -1,0 +1,128 @@
+0001   0000             ;
+0002   0000             ;   Title:   rom5.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   11 Jul 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
+0007   0000             ;            
+0008   0000             ;   Descr:   Minimal ROM to boot a system disk.  ROM banking supported.
+0009   0000             ;            Auto-boot supported.
+0010   0000             ;
+0011   0000             ;            If no disk in Drive A, tells user to mount a system disk.
+0012   0000             ;            Code written to work in 8080 & Z80 environments.    
+0013   0000                         
+0014   0000             DDA         .EQU    0080h       ; disk descriptor address
+0015   0000             MCP         .EQU    0F3h        ; MPU-B control (banked ROM) port
+0016   0000             FDC         .EQU    0FDh        ; Floppy disk controller (FIF) port
+0017   0000             
+0018   D800             .ORG    0D800H
+0019   D800             
+0020   D800 3E 40       start:  LD      A,40H           
+0021   D802 D3 F3               OUT     (MCP),A         ; turn off ROM at 0000-07FF
+0022   D804 C3 07 D8            JP      j01             ; allow auto-boot from 0000
+0023   D807 31 80 D7    j01:    LD      SP,0D780h       ; set up monitor stack 
+0024   D80A CD 69 D8            CALL    initSIO         ; initialize serial port
+0025   D80D CD 27 D8    j02:    CALL    readFD          ; read disk (1=success)
+0026   D810 3D                  DEC     A
+0027   D811 CA 20 D8            JP      Z,boot          ; disk was read, so jump to 0000.
+0028   D814 21 72 D8            LD      HL,noDisk
+0029   D817 CD 5F D8            CALL    putStr          ; "Put disk in Drive A..."
+0030   D81A CD 52 D8            CALL    getCh           ; wait until char is pressed
+0031   D81D C3 0D D8            JP      j02             ; and try again.
+0032   D820             
+0033   D820 3E C0       boot:   LD      A,0C0H          
+0034   D822 D3 F3               OUT     (MCP),A         ; remove ROM from memory map
+0035   D824 C3 00 00            JP      0000h           ; and boot to CP/M
+0036   D827             
+0037   D827             ; Set up a command to read the disk, execute the command, and receive result code 
+0038   D827             ;
+0039   D827 21 80 00    readFD: LD      HL,DDA          ; HL = disk descriptor address
+0040   D82A 11 A6 D8            LD      DE,cmdStr       ; copy of disk descriptor in scratchpad
+0041   D82D 06 07               LD      B,7             ; copie 7-byte descriptor to its address               
+0042   D82F EB          j03:    EX      DE,HL
+0043   D830 7E                  LD      A,(HL)          ; get a byte
+0044   D831 EB                  EX      DE,HL
+0045   D832 77                  LD      (HL),A          ; and store it, 8080-style
+0046   D833 23                  INC     HL              
+0047   D834 13                  INC     DE
+0048   D835 05                  DEC     B
+0049   D836 C2 2F D8            JP      NZ,j03          ; loop until done.
+0050   D839             
+0051   D839                     ; the disk descriptor is now initialized with a command
+0052   D839                     ; to read Drive 0/Track 0/Sector 1 to Address 0000.
+0053   D839                     ; Now inform controller where that command is located.
+0054   D839             
+0055   D839 3E 10               LD      A,10H           ; FDC cmd 10h = set disk descriptor
+0056   D83B D3 FD               OUT     (FDC),A         ; and sent command
+0057   D83D 21 80 00            LD      HL,DDA 
+0058   D840 7D                  LD      A,L
+0059   D841 D3 FD               OUT     (FDC),A         ; send LSB of disk descriptor
+0060   D843 7C                  LD      A,H
+0061   D844 D3 FD               OUT     (FDC),A         ; send MSB of disk descriptor
+0062   D846             
+0063   D846                     ; Tell the FDC to execute the command string
+0064   D846             
+0065   D846 AF                  XOR     A               ; cmd 0 = execute the command string
+0066   D847 D3 FD               OUT     (FDC),A         ; send it
+0067   D849             
+0068   D849                     ; Poll the result byte & return when reponse is received
+0069   D849             
+0070   D849 21 81 00            LD      HL,DDA+1        ; get disk descriptor address
+0071   D84C 7E          j04:    LD      A,(HL)          ; look at result code
+0072   D84D B7                  OR      A               ; still zero = no response?
+0073   D84E CA 4C D8            JP      Z,j04           ; wait until response received
+0074   D851 C9                  RET  
+0075   D852             
+0076   D852             ;
+0077   D852             ; Console support routines follow ------------------------------
+0078   D852             ;
+0079   D852             
+0080   D852             ; wait for a character from the console & retrieve it
+0081   D852             ;
+0082   D852 DB 03       getCh:  IN      A,(3)          ; check status
+0083   D854 E6 02               AND     2              ; look @ ready bit only
+0084   D856 CA 52 D8            JP      Z,getCh        ; wait until ready
+0085   D859 DB 02               IN      A,(2)          ; read waiting character
+0086   D85B C9                  RET 
+0087   D85C             
+0088   D85C             ; send a character to console, quick n dirty style.
+0089   D85C             ; really one should check TxRdy status bit before sending.
+0090   D85C             ;
+0091   D85C D3 02       putCh:      OUT  (2),A          ; send char to output devices
+0092   D85E C9                      RET
+0093   D85F             
+0094   D85F             ; write a null-terminated ASCII string, pointed to by HL, 
+0095   D85F             ; to the console
+0096   D85F             ;
+0097   D85F 7E          putStr:     LD      A,(HL)      ; load next char in string      
+0098   D860 B7                      OR      A           ; is it end-of-string NULL?
+0099   D861 C8                      RET     Z           ; if so, we are done
+0100   D862 CD 5C D8                CALL    putCh       ; send char to output device
+0101   D865 23                      INC     HL          ; point to next character in string
+0102   D866 C3 5F D8                JP      putStr      ; and loop until done
+0103   D869             
+0104   D869             ; initialize serial port
+0105   D869             ;
+0106   D869 3E CA       initSIO:    LD   A,0CAh         ; 7 BITS, NO PARITY, 2 STOP
+0107   D86B D3 03                   OUT  (3),A          ; UART A - SET MODE 
+0108   D86D 3E 27                   LD   A,027H         ; ENABLE TX & RX
+0109   D86F D3 03                   OUT  (3),A          ; UART A - SET CONTROL
+0110   D871 C9                      RET
+0111   D872             
+0112   D872 0D 0A 50 75 noDisk:     .db 13,10,"Put a system disk in Drive A and press any key.",13,10,0
+0112   D876 74 20 61 20 
+0112   D87A 73 79 73 74 
+0112   D87E 65 6D 20 64 
+0112   D882 69 73 6B 20 
+0112   D886 69 6E 20 44 
+0112   D88A 72 69 76 65 
+0112   D88E 20 41 20 61 
+0112   D892 6E 64 20 70 
+0112   D896 72 65 73 73 
+0112   D89A 20 61 6E 79 
+0112   D89E 20 6B 65 79 
+0112   D8A2 2E 0D 0A 00 
+0113   D8A6 21 00 00 00 cmdStr:     .db 21h,00,00,00,01,00,00h
+0113   D8AA 01 00 00 
+0114   D8AD             
+0115   D8AD             .ENDtasm: Number of errors = 0

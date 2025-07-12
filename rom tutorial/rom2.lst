@@ -1,0 +1,63 @@
+0001   0000             ;
+0002   0000             ;   Title:   rom2.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   11 Jul 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
+0007   0000             ;            
+0008   0000             ;   Descr:   ROM exercise - read the CP/M 2.2 bootloader
+0009   0000             ;            and jump to it.  
+0010   0000             ;
+0011   0000             ;            *** Does not work with NVS_BANK_ROM = 1 ***
+0012   0000             ;         
+0013   0000                         
+0014   0000             DDA         .EQU    0080h       ; disk descriptor address
+0015   0000             FDC         .EQU    0FDh        ; Floppy disk controller (FIF) port
+0016   0000             LED         .EQU    0FFh        ; front panel LED port
+0017   0000             
+0018   D800             .ORG    0D800H
+0019   D800             
+0020   D800 21 31 D8    readFD: LD      HL,cmdStr       ; source = command string
+0021   D803 11 80 00            LD      DE,DDA          ; destination = 0080h
+0022   D806 01 07 00            LD      BC,7            ; 7 bytes to copy  
+0023   D809 ED B0               LDIR                    ; do the copy, Z80 style            
+0024   D80B             
+0025   D80B                     ; the disk descriptor is now initialized with a command
+0026   D80B                     ; to read Drive 0/Track 0/Sector 1 to Address 0000.
+0027   D80B                     ; Now inform controller where that command is located.
+0028   D80B             
+0029   D80B 3E 10               LD      A,10H           ; cmd 10h = set disk descriptor
+0030   D80D D3 FD               OUT     (FDC),A         ; sent it
+0031   D80F 21 80 00            LD      HL,DDA 
+0032   D812 7D                  LD      A,L
+0033   D813 D3 FD               OUT     (FDC),A         ; send LSB of disk descriptor
+0034   D815 7C                  LD      A,H
+0035   D816 D3 FD               OUT     (FDC),A         ; send MSB of disk descriptor
+0036   D818             
+0037   D818                     ; Tell the FDC to execute the command string
+0038   D818             
+0039   D818 AF                  XOR     A               ; cmd 0 = execute the command string
+0040   D819 D3 FD               OUT     (FDC),A         ; send it
+0041   D81B             
+0042   D81B                     ; Poll the result byte & return when response is received
+0043   D81B             
+0044   D81B 21 81 00            LD      HL,DDA+1        ; point to result code
+0045   D81E 7E          loop:   LD      A,(HL)          ; get result
+0046   D81F B7                  OR      A               ; still zero = no response?
+0047   D820 CA 1E D8            JP      Z,loop          ; wait until response received
+0048   D823             
+0049   D823                     ; Show controller response code on the front panel LEDs
+0050   D823                     ; if read was successful, boot to CP/M
+0051   D823             
+0052   D823 2F                  CPL                     ; complement A for LED output
+0053   D824 D3 FF               OUT     (LED),A         ; output code to front panel LEDs
+0054   D826 2F                  CPL                     ; restore A
+0055   D827 3D                  DEC     A               ; result code 1 = success?
+0056   D828 CA 2E D8            JP      Z,boot          ; yes, so do the boot!
+0057   D82B C3 2B D8    stop:   JP      stop            ; otherwise stop
+0058   D82E             
+0059   D82E C3 00 00    boot:   JP      0000h           ; boot CP/M.
+0060   D831             
+0061   D831 21 00 00 00 cmdStr:     .db 21h,00,00,00,01,00,00h
+0061   D835 01 00 00 
+0062   D838             .ENDtasm: Number of errors = 0

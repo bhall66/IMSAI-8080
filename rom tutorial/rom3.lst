@@ -1,0 +1,68 @@
+0001   0000             ;
+0002   0000             ;   Title:   rom3.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   11 Jul 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
+0007   0000             ;            
+0008   0000             ;   Descr:   ROM exercise - read the CP/M 2.2 bootloader
+0009   0000             ;            and jump to it.  ROM banking support added.  
+0010   0000             ;
+0011   0000             ;            Compatible with any CP/M 2.2 system disk.
+0012   0000             ;         
+0013   0000                         
+0014   0000             DDA         .EQU    0080h       ; disk descriptor address
+0015   0000             MCP         .EQU    0F3h        ; MPU-B Memory Control port
+0016   0000             FDC         .EQU    0FDh        ; Floppy disk controller (FIF) port
+0017   0000             LED         .EQU    0FFh        ; front panel LED port
+0018   0000             
+0019   D800             .ORG    0D800H
+0020   D800             
+0021   D800 3E 40       start:  LD      A,40H           
+0022   D802 D3 F3               OUT     (MCP),A         ; turn off ROM at 0000-07FF
+0023   D804 21 39 D8    readFD: LD      HL,cmdStr       ; source = command string
+0024   D807 11 80 00            LD      DE,DDA          ; destination = 0080h
+0025   D80A 01 07 00            LD      BC,7            ; 7 bytes to copy  
+0026   D80D ED B0               LDIR                    ; do the copy, Z80 style            
+0027   D80F             
+0028   D80F                     ; the disk descriptor is now initialized with a command
+0029   D80F                     ; to read Drive 0/Track 0/Sector 1 to Address 0000.
+0030   D80F                     ; Now inform controller where that command is located.
+0031   D80F             
+0032   D80F 3E 10               LD      A,10H           ; cmd 10h = set disk descriptor
+0033   D811 D3 FD               OUT     (FDC),A         ; sent it
+0034   D813 21 80 00            LD      HL,DDA 
+0035   D816 7D                  LD      A,L
+0036   D817 D3 FD               OUT     (FDC),A         ; send LSB of disk descriptor
+0037   D819 7C                  LD      A,H
+0038   D81A D3 FD               OUT     (FDC),A         ; send MSB of disk descriptor
+0039   D81C             
+0040   D81C                     ; Tell the FDC to execute the command string
+0041   D81C             
+0042   D81C AF                  XOR     A               ; cmd 0 = execute the command string
+0043   D81D D3 FD               OUT     (FDC),A         ; send it
+0044   D81F             
+0045   D81F                     ; Poll the result byte & return when response is received
+0046   D81F             
+0047   D81F 21 81 00            LD      HL,DDA+1        ; point to result code
+0048   D822 7E          loop:   LD      A,(HL)          ; get result
+0049   D823 B7                  OR      A               ; still zero = no response?
+0050   D824 CA 22 D8            JP      Z,loop          ; wait until response received
+0051   D827             
+0052   D827                     ; Show controller response code on the front panel LEDs
+0053   D827                     ; if read was successful, boot to CP/M
+0054   D827             
+0055   D827 2F                  CPL                     ; complement A for LED output
+0056   D828 D3 FF               OUT     (LED),A         ; output code to front panel LEDs
+0057   D82A 2F                  CPL                     ; restore A
+0058   D82B 3D                  DEC     A               ; result code 1 = success?
+0059   D82C CA 32 D8            JP      Z,boot          ; yes, so do the boot!
+0060   D82F C3 2F D8    stop:   JP      stop            ; otherwise stop
+0061   D832             
+0062   D832 3E C0       boot:   LD      A,0C0H          
+0063   D834 D3 F3               OUT     (MCP),A         ; remove ROM from memory map
+0064   D836 C3 00 00            JP      0000h           ; and boot to CP/M
+0065   D839             
+0066   D839 21 00 00 00 cmdStr:     .db 21h,00,00,00,01,00,00h
+0066   D83D 01 00 00 
+0067   D840             .ENDtasm: Number of errors = 0

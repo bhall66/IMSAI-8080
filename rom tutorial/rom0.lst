@@ -1,0 +1,35 @@
+0001   0000             ;
+0002   0000             ;   Title:   rom0asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   05 Jul 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
+0007   0000             ;            
+0008   0000             ;   Descr:   Make a small custom ROM
+0009   0000             ;            
+0010   0000             
+0011   D800             .ORG    0D800H
+0012   D800             
+0013   D800 3E CA       start:      LD      A,0CAh      ; 7 BITS, NO PARITY, 2 STOP
+0014   D802 D3 03                   OUT     (3),A       ; UART A - SET MODE 
+0015   D804 3E 27                   LD      A,027H      ; ENABLE TX & RX
+0016   D806 D3 03                   OUT     (3),A       ; UART A - SET CONTROL
+0017   D808 21 19 D8                LD      HL,str
+0018   D80B             
+0019   D80B 7E          loop:       LD      A,(HL)      ; load next char in string      
+0020   D80C B7                      OR      A           ; is it end-of-string NULL?
+0021   D80D CA 16 D8                JP      Z,stop      ; if so, we are done
+0022   D810 D3 02                   OUT     (2),A       ; send char to serial port
+0023   D812 23                      INC     HL          ; point to next character in string
+0024   D813 C3 0B D8                JP      loop        ; and loop until done
+0025   D816             
+0026   D816 C3 16 D8    stop:       JP      stop        ; loop here until reset
+0027   D819             
+0028   D819 49 4D 53 41 str:        .db "IMSAI 8080 Custom ROM",0
+0028   D81D 49 20 38 30 
+0028   D821 38 30 20 43 
+0028   D825 75 73 74 6F 
+0028   D829 6D 20 52 4F 
+0028   D82D 4D 00 
+0029   D82F             
+0030   D82F             .ENDtasm: Number of errors = 0

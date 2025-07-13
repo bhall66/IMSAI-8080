@@ -1,0 +1,118 @@
+0001   0000             ;
+0002   0000             ;   Title:   rom6.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   13 Jul 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
+0007   0000             ;            
+0008   0000             ;   Descr:   Displays program counter before and after a local jump.
+0009   0000             ;            It is used to study ROM Banking and Auto-Run behavior.
+0010   0000             ;            Run this code as a ROM.
+0011   0000               
+0012   0000                         
+0013   0000             MCP     .EQU    0F3h            ; MPU-B control (banked ROM) port
+0014   0000             
+0015   D800             .ORG    0D800H
+0016   D800             
+0017   D800 31 80 D7    start:  LD      SP,0D780h       ; set up stack 
+0018   D803 CD 6E D8            CALL    initSIO         ; initialize serial port
+0019   D806 21 77 D8            LD      HL,st1          
+0020   D809 CD 39 D8            CALL    putStr          ; print "Address before jump"
+0021   D80C CD 0F D8            CALL    locn0           ; push PC on stack like a normal call
+0022   D80F E1          locn0:  POP     HL              ; get PC into HL
+0023   D810 CD 61 D8            CALL    pHex16          ; print the address
+0024   D813 CD 43 D8            CALL    crlf            
+0025   D816 C3 19 D8            JP      j01             ; jump to next address
+0026   D819 21 8D D8    j01:    LD      HL,st2          
+0027   D81C CD 39 D8            CALL    putStr          ; print "Address after jump"
+0028   D81F CD 22 D8            CALL    locn1           ; push PC on stack like a normal call
+0029   D822 E1          locn1:  POP     HL              ; get PC into HL
+0030   D823 CD 61 D8            CALL    pHex16          ; print the address
+0031   D826 CD 43 D8            CALL    crlf            
+0032   D829 C3 29 D8    fin:    JP      fin           
+0033   D82C             
+0034   D82C             
+0035   D82C             ;
+0036   D82C             ; Console support routines follow ------------------------------
+0037   D82C             ;
+0038   D82C             
+0039   D82C             ; wait for a character from the console & retrieve it
+0040   D82C             ;
+0041   D82C DB 03       getCh:  IN      A,(3)          ; check status
+0042   D82E E6 02               AND     2              ; look @ ready bit only
+0043   D830 CA 2C D8            JP      Z,getCh        ; wait until ready
+0044   D833 DB 02               IN      A,(2)          ; read waiting character
+0045   D835 C9                  RET 
+0046   D836             
+0047   D836             ; send a character to console, quick n dirty style.
+0048   D836             ; really one should check TxRdy status bit before sending.
+0049   D836             ;
+0050   D836 D3 02       putCh:      OUT  (2),A          ; send char to output devices
+0051   D838 C9                      RET
+0052   D839             
+0053   D839             ; write a null-terminated ASCII string, pointed to by HL, 
+0054   D839             ; to the console
+0055   D839             ;
+0056   D839 7E          putStr:     LD      A,(HL)      ; load next char in string      
+0057   D83A B7                      OR      A           ; is it end-of-string NULL?
+0058   D83B C8                      RET     Z           ; if so, we are done
+0059   D83C CD 36 D8                CALL    putCh       ; send char to output device
+0060   D83F 23                      INC     HL          ; point to next character in string
+0061   D840 C3 39 D8                JP      putStr      ; and loop until done
+0062   D843             
+0063   D843             ; crlf issues a two byte carriage return/line feed combo to output devices
+0064   D843             ; 
+0065   D843 3E 0D       crlf:       LD   A,0DH
+0066   D845 CD 36 D8                CALL putCh          ; output CR
+0067   D848 3E 0A                   LD   A,0AH
+0068   D84A C3 36 D8                JP   putCh          ; output LF
+0069   D84D             
+0070   D84D             ; pHex prints the byte in A as a two-digit hexadecimal
+0071   D84D             ; for example, value 0A8h is printed as two ASCII characters "A8"
+0072   D84D             ;
+0073   D84D F5          pHex:       PUSH AF             ; save value
+0074   D84E 0F                      RRCA                ; rotate first digit into lower 4 bits
+0075   D84F 0F                      RRCA    
+0076   D850 0F                      RRCA    
+0077   D851 0F                      RRCA    
+0078   D852 CD 56 D8                CALL j07            ; convert first digit to ASCII
+0079   D855 F1                      POP  AF             ; restore value & continue with 2nd digit
+0080   D856 E6 0F       j07:        AND  0FH            ; consider only lower 4 bits
+0081   D858 C6 90                   ADD  A,90H          ; convert value to ASCII
+0082   D85A 27                      DAA                 ; via clever textbook routine
+0083   D85B CE 40                   ADC  A,40H
+0084   D85D 27                      DAA     
+0085   D85E C3 36 D8                JP   putCh          ; output ASCII character
+0086   D861             
+0087   D861             ; pHex16 prints the word in HL as a four-digit hexadecimal, followed by a space
+0088   D861             ; for example, value 0A8EEh is printed as two ASCII characters "A8EE "
+0089   D861             ;
+0090   D861 7C          pHex16:     LD   A,H            ; get MSB
+0091   D862 CD 4D D8                CALL pHex           ; and output ASCII for it
+0092   D865 7D                      LD   A,L            ; then get LSB
+0093   D866 CD 4D D8    pHexSp:     CALL pHex           ; and output ASCII for it
+0094   D869 3E 20       space:      LD   A,20H           
+0095   D86B C3 36 D8                JP   putCh          ; print a space
+0096   D86E             
+0097   D86E             ; initialize serial port
+0098   D86E             ;
+0099   D86E 3E CA       initSIO:    LD   A,0CAh         ; 7 BITS, NO PARITY, 2 STOP
+0100   D870 D3 03                   OUT  (3),A          ; UART A - SET MODE 
+0101   D872 3E 27                   LD   A,027H         ; ENABLE TX & RX
+0102   D874 D3 03                   OUT  (3),A          ; UART A - SET CONTROL
+0103   D876 C9                      RET
+0104   D877             
+0105   D877 41 64 64 72 st1:     .db "Address before jump: ",0
+0105   D87B 65 73 73 20 
+0105   D87F 62 65 66 6F 
+0105   D883 72 65 20 6A 
+0105   D887 75 6D 70 3A 
+0105   D88B 20 00 
+0106   D88D 41 64 64 72 st2:     .db "Address after jump:  ",0
+0106   D891 65 73 73 20 
+0106   D895 61 66 74 65 
+0106   D899 72 20 6A 75 
+0106   D89D 6D 70 3A 20 
+0106   D8A1 20 00 
+0107   D8A3             
+0108   D8A3             .ENDtasm: Number of errors = 0

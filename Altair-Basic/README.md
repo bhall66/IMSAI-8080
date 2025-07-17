@@ -8,7 +8,7 @@ Copyright 1975, Bill Gates, Paul Allen, Monte Davidoff
 
 
 
-basic.hex is a rom image file for running Altair Basic on the emulated IMSAI 8080 by TheHighNibble.
+basic.hex is a rom image file for running Altair Basic on an emulated IMSAI 8080 by TheHighNibble.
 
 
 

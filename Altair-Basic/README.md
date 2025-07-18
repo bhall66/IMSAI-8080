@@ -20,7 +20,7 @@ MEMORY 5
 
 ram         0,256
 
-rom         0xd8,16,basic.hex
+rom         0xd8,16,basic-rom.hex
 
 boot        0xd800
 
@@ -30,5 +30,5 @@ Set your NVS configuration to 8558, 0558, 0D58, or something similar.
 
 
 
-"basic-tape.hex" is a paper tape file.  Load it via monitor/paper tape reader and run it at address 0000. 
+"basic-tape.hex" is a paper tape file.  Load it via monitor/paper tape reader and run it at address 0000.
 

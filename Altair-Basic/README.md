@@ -8,7 +8,7 @@ Copyright 1975, Bill Gates, Paul Allen, Monte Davidoff
 
 
 
-basic.hex is a rom image file for running Altair Basic on an emulated IMSAI 8080 by TheHighNibble.
+"basic-rom.hex" is a rom image file for running Altair Basic on an emulated IMSAI 8080 by TheHighNibble.
 
 
 
@@ -27,4 +27,8 @@ boot        0xd800
 
 
 Set your NVS configuration to 8558, 0558, 0D58, or something similar.
+
+
+
+"basic-tape.hex" is a paper tape file.  Load it via monitor/paper tape reader and run it at address 0000. 
 

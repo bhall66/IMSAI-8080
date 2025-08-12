@@ -1,12 +1,12 @@
 0001   0000             ;
-0002   0000             ;   Title:   rtc4.asm
+0002   0000             ;   Title:   rtc5.asm
 0003   0000             ;  Author:   Bruce E. Hall, w8bh
-0004   0000             ;    Date:   10 Aug 2025
+0004   0000             ;    Date:   12 Aug 2025
 0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
 0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
 0007   0000             ;            
 0008   0000             ;   Descr:   Real Time Clock (RTC) Tutorial
-0009   0000             ;            Learn how to handle the system time & date under CP/M 2.2
+0009   0000             ;            Learn how to handle time & date under CP/M 2.2
 0010   0000             ;
 0011   0000             
 0012   0000             CLKCMD      .EQU    41h         ; RTC command port
@@ -15,200 +15,173 @@
 0015   0100                         .ORG    100h        ; Run under CP/M
 0016   0100             
 0017   0100 31 00 10    start:      LD   SP,1000h       ; establish local stack  
-0018   0103 CD A4 01                CALL getTime        ; hour/min/sec/days, etc
-0019   0106 21 16 02                LD   HL,stTime 
-0020   0109 CD E5 01                CALL putStr         ; "The time is "
-0021   010C CD 20 01                CALL pTime12        ; print time in 24-hr format
-0022   010F CD 86 01                CALL printDOW       ; print day of week
-0023   0112 3E 20                   LD   A,' '
-0024   0114 CD EF 01                CALL putCh          ; followed by space
-0025   0117 CD 53 01                CALL pDate          ; then print the date
-0026   011A CD F2 01                CALL crlf               
-0027   011D C3 00 00    fin:        JP   0000           ; return to CP/M
-0028   0120             
-0029   0120             
-0030   0120             ; print current local time in AM/PM format
-0031   0120             ; 
-0032   0120 21 47 02    pTime12:    LD   HL,stAM        ; assume AM for now
-0033   0123 3A 0E 02                LD   A,(hour)       ; get the hour (in BCD)
-0034   0126 FE 12                   CP   12h            ; hour < 12?
-0035   0128 DA 34 01                JP   C,j08          ; yes, keep hour as AM
-0036   012B CA 31 01                JP   Z,j09          ; if 12PM, don't change hour
-0037   012E D6 12                   SUB  12h            ; if hour is 13+, subtract 12
-0038   0130 27                      DAA                 ; adjust result for BCD
-0039   0131 21 4D 02    j09:        LD   HL,stPM        ; use PM, not AM
-0040   0134 E5          j08:        PUSH HL             ; save AM/PM pointer
-0041   0135 CD FC 01                CALL pBCD           ; print hours in 12hr format
-0042   0138 3E 3A                   LD   A,':'
-0043   013A CD EF 01                CALL putCh 
-0044   013D 3A 0D 02                LD   A,(min) 
-0045   0140 CD FC 01                CALL pBCD           ; print minutes
-0046   0143 3E 3A                   LD   A,':'
-0047   0145 CD EF 01                CALL putCh 
-0048   0148 3A 0C 02                LD   A,(sec) 
-0049   014B CD FC 01                CALL pBCD           ; print seconds  
-0050   014E E1                      POP  HL 
-0051   014F CD E5 01                CALL putStr         ; print AM or PM 
-0052   0152 C9                      RET 
-0053   0153             
-0054   0153             
-0055   0153             ; print the date as month/day/year
-0056   0153             ;
-0057   0153 3A 12 02    pDate:      LD   A,(mon)
-0058   0156 3C                      INC  A              ; 0-based to 1-based months
-0059   0157 27                      DAA 
-0060   0158 CD FC 01                CALL pBCD           ; print month
-0061   015B 3E 2F                   LD   A,'/'
-0062   015D CD EF 01                CALL putCh
-0063   0160 3A 11 02                LD   A,(day) 
-0064   0163 CD FC 01                CALL pBCD           ; print day 
-0065   0166 3E 2F                   LD   A,'/'
-0066   0168 CD EF 01                CALL putCh 
-0067   016B 3A 13 02                LD   A,(year)
-0068   016E D6 A0                   SUB  0A0h           ; change base 1900 to 2000
-0069   0170 CD FC 01                CALL pBCD           ; print year
-0070   0173 C9                      RET          
-0071   0174             
-0072   0174             
-0073   0174 2A 0F 02    calcDOW:    LD   HL,(days)      ; HL = days since 1/1/78
-0074   0177 2B                      DEC  HL             ; dont count current day
-0075   0178 11 07 00                LD   DE,7           ; divisor is 7
-0076   017B AF                      XOR  A              ; clear carry for next op
-0077   017C ED 52       jDW:        SBC  HL,DE          ; subtract the divisor
-0078   017E 30 FC                   JR   NC,jDW         ; keep subtracting until neg
-0079   0180 19                      ADD  HL,DE          ; undo last subtraction
-0080   0181 7D                      LD   A,L            ; remainder now in HL
-0081   0182 32 15 02                LD   (dow),A        ; store remainder
-0082   0185 C9                      RET 
-0083   0186             
-0084   0186             
-0085   0186 3A 15 02    printDOW:   LD   A,(dow)        ; A = day of week
-0086   0189 07                      RLCA                ; A x 2 
-0087   018A 07                      RLCA                ; A x 4
-0088   018B 06 00                   LD   B,0 
-0089   018D 4F                      LD   C,A            ; offset BC = dow x 4
-0090   018E 21 2B 02                LD   HL,stDow       ; point to days of week
-0091   0191 09                      ADD  HL,BC          ; add in offset
-0092   0192 CD E5 01                CALL putStr         ; print day of week
-0093   0195 C9                      RET 
-0094   0196             
-0095   0196             
-0096   0196             ; getRTC:
-0097   0196             ; encapsulates I/O port communication with RTC
-0098   0196             ; call with RTC parameter# in A
-0099   0196             ; returns with RTC value in A
-0100   0196             ;
-0101   0196 D3 41       getRTC:     OUT  (CLKCMD),A     ; send RTC command
-0102   0198 DB 42                   IN   A,(CLKDAT)     ; get RTC value
-0103   019A C9                      RET 
-0104   019B             
-0105   019B             
-0106   019B             ; forceDec - change RTC return values from default to BCD to decimal
-0107   019B             ; this routine shown for completeness but not needed here.
-0108   019B             ;
-0109   019B DB 41       forceDec:   IN   A,(CLKCMD)     ; read RTC format (0=BCD,1=decimal)
-0110   019D B7                      OR   A              ; set flags
-0111   019E C0                      RET  NZ             ; return if already in decimal
-0112   019F 3E FF                   LD   A,0FFh         ; must be in BCD format, so
-0113   01A1 D3 41                   OUT  (CLKCMD),A     ; toggle format: BCD->decimal  
-0114   01A3 C9                      RET 
-0115   01A4             
-0116   01A4             
-0117   01A4             ; getTime:
-0118   01A4             ; queries the RTC and saves time variables in memory as
-0119   01A4             ; hour, min, sec, days, month, day, & year
-0120   01A4             ;
-0121   01A4 3E 00       getTime:    LD   A,0              
-0122   01A6 CD 96 01                CALL getRTC         ; RTC 0 = seconds
-0123   01A9 32 0C 02                LD   (sec),A        ; save seconds           
-0124   01AC 3E 01                   LD   A,1
-0125   01AE CD 96 01                CALL getRTC         ; RTC 1 = minutes
-0126   01B1 32 0D 02                LD   (min),A        ; save minutes                       
-0127   01B4 3E 02                   LD   A,2
-0128   01B6 CD 96 01                CALL getRTC         ; RTC 2 = hours
-0129   01B9 32 0E 02                LD   (hour),A       ; save hours  
-0130   01BC 3E 03                   LD   A,3 
-0131   01BE CD 96 01                CALL getRTC         ; RTC 3 = days/LSB
-0132   01C1 32 0F 02                LD   (days),A       ; save days LSB        
-0133   01C4 3E 04                   LD   A,4
-0134   01C6 CD 96 01                CALL getRTC         ; RTC 4 = days/MSB
-0135   01C9 32 10 02                LD   (days+1),A     ; save days MSB   
-0136   01CC 3E 05                   LD   A,5 
-0137   01CE CD 96 01                CALL getRTC         ; RTC 5 = day of month
-0138   01D1 32 11 02                LD   (day),A        ; save day   
-0139   01D4 3E 06                   LD   A,6
-0140   01D6 CD 96 01                CALL getRTC         ; RTC 6 = month 
-0141   01D9 32 12 02                LD   (mon),A        ; save month 
-0142   01DC 3E 07                   LD   A,7 
-0143   01DE CD 96 01                CALL getRTC         ; RTC 7 = year 
-0144   01E1 32 13 02                LD   (year),A       ; save year
-0145   01E4 C9                      RET         
-0146   01E5             
-0147   01E5             
-0148   01E5             ; write a null-terminated ASCII string, pointed to by HL, 
-0149   01E5             ; to the console
-0150   01E5             ;
-0151   01E5 7E          putStr:     LD      A,(HL)      ; load next char in string      
-0152   01E6 B7                      OR      A           ; is it end-of-string NULL?
-0153   01E7 C8                      RET     Z           ; if so, we are done
-0154   01E8 CD EF 01                CALL    putCh       ; send char to output device
-0155   01EB 23                      INC     HL          ; point to next character in string
-0156   01EC C3 E5 01                JP      putStr      ; and loop until done
-0157   01EF             
-0158   01EF             
-0159   01EF             ; send a character to console.
-0160   01EF             ; (really one should check TxRdy status bit before sending.)
-0161   01EF             ;
-0162   01EF D3 02       putCh:      OUT  (2),A          ; send char to output devices
-0163   01F1 C9                      RET
-0164   01F2             
-0165   01F2             
-0166   01F2             ; crlf issues a two byte carriage return/line feed combo to output devices
-0167   01F2             ; 
-0168   01F2 3E 0D       crlf:       LD   A,0DH
-0169   01F4 CD EF 01                CALL putCh          ; output CR
-0170   01F7 3E 0A                   LD   A,0AH
-0171   01F9 C3 EF 01                JP   putCh          ; output LF        
-0172   01FC             
-0173   01FC             
-0174   01FC             ; pBCD prints the BCD byte in A as a two-digit value
-0175   01FC             ; for example, value 38h is printed as two ASCII characters "38"
-0176   01FC             ;
-0177   01FC F5          pBCD:       PUSH AF             ; save value
-0178   01FD 0F                      RRCA                ; rotate first digit into lower 4 bits
-0179   01FE 0F                      RRCA    
-0180   01FF 0F                      RRCA    
-0181   0200 0F                      RRCA    
-0182   0201 CD 05 02                CALL jBC            ; convert first digit to ASCII
-0183   0204 F1                      POP  AF             ; restore value & continue with 2nd digit
-0184   0205 E6 0F       jBC:        AND  0FH            ; consider only lower 4 bits
-0185   0207 C6 30                   ADD  A,30H          ; convert value to ASCII  
-0186   0209 C3 EF 01                JP   putCh          ; output ASCII character
-0187   020C             
-0188   020C 00          sec:        .db 00
-0189   020D 00          min:        .db 00    
-0190   020E 00          hour:       .db 00
-0191   020F 00 00       days:       .dw 0000
-0192   0211 00          day:        .db 00
-0193   0212 00          mon:        .db 00
-0194   0213 00 00       year:       .dw 0000
-0195   0215 00          dow:        .db 00
-0196   0216 54 68 65 20 stTime:     .db "The current time is ",0
-0196   021A 63 75 72 72 
-0196   021E 65 6E 74 20 
-0196   0222 74 69 6D 65 
-0196   0226 20 69 73 20 
-0196   022A 00 
-0197   022B 53 75 6E 00 stDow:      .db "Sun",0,"Mon",0,"Tue",0,"Wed",0,"Thu",0,"Fri",0,"Sat",0 
-0197   022F 4D 6F 6E 00 
-0197   0233 54 75 65 00 
-0197   0237 57 65 64 00 
-0197   023B 54 68 75 00 
-0197   023F 46 72 69 00 
-0197   0243 53 61 74 00 
-0198   0247 20 41 4D 2C stAM:       .db " AM, ",0
-0198   024B 20 00 
-0199   024D 20 50 4D 2C stPM:       .db " PM, ",0
-0199   0251 20 00 
-0200   0253             
-0201   0253             .END tasm: Number of errors = 0
+0018   0103 CD 23 01                CALL getTime        ; get hour/min/sec/days, etc
+0019   0106 CD 36 01                CALL calcDOW        ; get DOW, too!
+0020   0109 21 DD 01                LD   HL,stTime 
+0021   010C CD AC 01                CALL putStr         ; "The time is "
+0022   010F CD 48 01                CALL pTime12        ; print time in 12-hr format
+0023   0112 CD 9C 01                CALL printDOW       ; print day of week
+0024   0115 3E 20                   LD   A,' '
+0025   0117 CD B6 01                CALL putCh          ; followed by space
+0026   011A CD 7B 01                CALL pDate          ; then print the date
+0027   011D CD B9 01                CALL crlf               
+0028   0120 C3 00 00    fin:        JP   0000           ; return to CP/M
+0029   0123             
+0030   0123             
+0031   0123             ; getTime:
+0032   0123             ; queries the RTC and saves time variables in memory as
+0033   0123             ; sec, min, hour, days, day, month, & year
+0034   0123             ;
+0035   0123 06 08       getTime:    LD   B,8            ; 8 parameters to retrieve
+0036   0125 21 D3 01                LD   HL,sec         ; point to first param
+0037   0128 3E 08       jGT:        LD   A,8            
+0038   012A 90                      SUB  B              ; A = 0 through 7
+0039   012B D3 41                   OUT  (CLKCMD),A     ; send the RTC command
+0040   012D DB 42                   IN   A,(CLKDAT)     ; and get the RTC result
+0041   012F 77                      LD   (HL),A         ; store the result
+0042   0130 23                      INC  HL             ; advance pointer
+0043   0131 05                      DEC  B              ; for 8080, dont use DJNZ
+0044   0132 C2 28 01                JP   NZ,jGT         ; loop until done            
+0045   0135 C9                      RET 
+0046   0136             
+0047   0136             
+0048   0136             ; Calculate the day of the week: 0=Sunday, 1=Monday, etc
+0049   0136             ;
+0050   0136 2A D6 01    calcDOW:    LD   HL,(days)      ; HL = days since 1/1/78
+0051   0139 2B                      DEC  HL             ; dont count current day
+0052   013A 11 07 00                LD   DE,7           ; divisor is 7
+0053   013D AF                      XOR  A              ; clear carry for next op
+0054   013E ED 52       jDW:        SBC  HL,DE          ; subtract the divisor
+0055   0140 30 FC                   JR   NC,jDW         ; keep subtracting until neg
+0056   0142 19                      ADD  HL,DE          ; undo last subtraction
+0057   0143 7D                      LD   A,L            ; remainder now in HL
+0058   0144 32 DC 01                LD   (dow),A        ; store remainder as day of week
+0059   0147 C9                      RET 
+0060   0148             
+0061   0148             
+0062   0148             ; print current local time in 12-hr (AM/PM) format
+0063   0148             ; 
+0064   0148 21 0E 02    pTime12:    LD   HL,stAM        ; assume AM for now
+0065   014B 3A D5 01                LD   A,(hour)       ; get the hour (in BCD)
+0066   014E FE 12                   CP   12h            ; hour < 12?
+0067   0150 DA 5C 01                JP   C,j08          ; yes, keep hour as AM
+0068   0153 CA 59 01                JP   Z,j09          ; if 12PM, don't change hour
+0069   0156 D6 12                   SUB  12h            ; if hour is 13+, subtract 12
+0070   0158 27                      DAA                 ; adjust result for BCD
+0071   0159 21 14 02    j09:        LD   HL,stPM        ; use PM, not AM
+0072   015C E5          j08:        PUSH HL             ; save AM/PM pointer
+0073   015D CD C3 01                CALL pBCD           ; print hours in 12hr format
+0074   0160 3E 3A                   LD   A,':'
+0075   0162 CD B6 01                CALL putCh 
+0076   0165 3A D4 01                LD   A,(min) 
+0077   0168 CD C3 01                CALL pBCD           ; print minutes
+0078   016B 3E 3A                   LD   A,':'
+0079   016D CD B6 01                CALL putCh 
+0080   0170 3A D3 01                LD   A,(sec) 
+0081   0173 CD C3 01                CALL pBCD           ; print seconds  
+0082   0176 E1                      POP  HL 
+0083   0177 CD AC 01                CALL putStr         ; print AM or PM 
+0084   017A C9                      RET 
+0085   017B             
+0086   017B             
+0087   017B             ; print the date as month/day/year
+0088   017B             ;
+0089   017B 3A D9 01    pDate:      LD   A,(mon)
+0090   017E 3C                      INC  A              ; 0-based to 1-based months
+0091   017F 27                      DAA                 ; handle BCD math
+0092   0180 CD C3 01                CALL pBCD           ; print month
+0093   0183 3E 2F                   LD   A,'/'
+0094   0185 CD B6 01                CALL putCh
+0095   0188 3A D8 01                LD   A,(day) 
+0096   018B CD C3 01                CALL pBCD           ; print day 
+0097   018E 3E 2F                   LD   A,'/'
+0098   0190 CD B6 01                CALL putCh 
+0099   0193 3A DA 01                LD   A,(year)       ; has y2K error, fixed in next line
+0100   0196 D6 A0                   SUB  0A0h           ; change base 1900 to 2000
+0101   0198 CD C3 01                CALL pBCD           ; print year
+0102   019B C9                      RET          
+0103   019C             
+0104   019C             ; Print the day of the week
+0105   019C             ;
+0106   019C 3A DC 01    printDOW:   LD   A,(dow)        ; A = day of week
+0107   019F 07                      RLCA                ; A x 2 
+0108   01A0 07                      RLCA                ; A x 4
+0109   01A1 06 00                   LD   B,0 
+0110   01A3 4F                      LD   C,A            ; offset BC = dow x 4
+0111   01A4 21 F2 01                LD   HL,stDow       ; point to days of week
+0112   01A7 09                      ADD  HL,BC          ; add in offset
+0113   01A8 CD AC 01                CALL putStr         ; print day of week
+0114   01AB C9                      RET 
+0115   01AC             
+0116   01AC             
+0117   01AC             ; write a null-terminated ASCII string, pointed to by HL 
+0118   01AC             ;
+0119   01AC 7E          putStr:     LD      A,(HL)      ; load next char in string      
+0120   01AD B7                      OR      A           ; is it end-of-string NULL?
+0121   01AE C8                      RET     Z           ; if so, we are done
+0122   01AF CD B6 01                CALL    putCh       ; send char to output device
+0123   01B2 23                      INC     HL          ; point to next character in string
+0124   01B3 C3 AC 01                JP      putStr      ; and loop until done
+0125   01B6             
+0126   01B6             
+0127   01B6             ; send a character to console.
+0128   01B6             ; (really one should check TxRdy status bit before sending.)
+0129   01B6             ;
+0130   01B6 D3 02       putCh:      OUT  (2),A          ; send char to output devices
+0131   01B8 C9                      RET
+0132   01B9             
+0133   01B9             
+0134   01B9             ; crlf issues a two byte carriage return/line feed combo to output devices
+0135   01B9             ; 
+0136   01B9 3E 0D       crlf:       LD   A,0DH
+0137   01BB CD B6 01                CALL putCh          ; output CR
+0138   01BE 3E 0A                   LD   A,0AH
+0139   01C0 C3 B6 01                JP   putCh          ; output LF        
+0140   01C3             
+0141   01C3             
+0142   01C3             ; pBCD prints the BCD byte in A as a two-digit value
+0143   01C3             ; for example, value 38h is printed as two ASCII characters "38"
+0144   01C3             ;
+0145   01C3 F5          pBCD:       PUSH AF             ; save value
+0146   01C4 0F                      RRCA                ; rotate first digit into lower 4 bits
+0147   01C5 0F                      RRCA    
+0148   01C6 0F                      RRCA    
+0149   01C7 0F                      RRCA    
+0150   01C8 CD CC 01                CALL jBC            ; convert first digit to ASCII
+0151   01CB F1                      POP  AF             ; restore value & continue with 2nd digit
+0152   01CC E6 0F       jBC:        AND  0FH            ; consider only lower 4 bits
+0153   01CE C6 30                   ADD  A,30H          ; convert value to ASCII  
+0154   01D0 C3 B6 01                JP   putCh          ; output ASCII character
+0155   01D3             
+0156   01D3             
+0157   01D3             ; RTC variables follow
+0158   01D3             ; they are loaded as a 8-byte block, so keep them together in same order
+0159   01D3 00          sec:        .db 00              ; stored as BCD
+0160   01D4 00          min:        .db 00              ; stored as BCD
+0161   01D5 00          hour:       .db 00              ; stored as BCD
+0162   01D6 00 00       days:       .dw 0000            ; stored as 16-bit word, days since 1/1/78
+0163   01D8 00          day:        .db 00              ; stored as BCD
+0164   01D9 00          mon:        .db 00              ; stored as BCD, Jan=0, Feb=1, etc
+0165   01DA 00 00       year:       .dw 00              ; stored as pseudo-BCD with Y2K error
+0166   01DC             
+0167   01DC             ; addition variables follow
+0168   01DC 00          dow:        .db 00
+0169   01DD 54 68 65 20 stTime:     .db "The current time is ",0
+0169   01E1 63 75 72 72 
+0169   01E5 65 6E 74 20 
+0169   01E9 74 69 6D 65 
+0169   01ED 20 69 73 20 
+0169   01F1 00 
+0170   01F2 53 75 6E 00 stDow:      .db "Sun",0,"Mon",0,"Tue",0,"Wed",0,"Thu",0,"Fri",0,"Sat",0 
+0170   01F6 4D 6F 6E 00 
+0170   01FA 54 75 65 00 
+0170   01FE 57 65 64 00 
+0170   0202 54 68 75 00 
+0170   0206 46 72 69 00 
+0170   020A 53 61 74 00 
+0171   020E 20 41 4D 2C stAM:       .db " AM, ",0
+0171   0212 20 00 
+0172   0214 20 50 4D 2C stPM:       .db " PM, ",0
+0172   0218 20 00 
+0173   021A             
+0174   021A             .END tasm: Number of errors = 0

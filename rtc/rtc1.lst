@@ -1,0 +1,135 @@
+0001   0000             ;
+0002   0000             ;   Title:   rtc1.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   04 Aug 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
+0007   0000             ;            
+0008   0000             ;   Descr:   Real Time Clock (RTC) Tutorial
+0009   0000             ;            Learn how to read/display time under CP/M 2.2
+0010   0000             ;
+0011   0000             
+0012   0000             CLKCMD      .EQU    41h         ; RTC command port
+0013   0000             CLKDAT      .EQU    42h         ; RTC data port
+0014   0000             
+0015   0100                         .ORG    100h        ; Run under CP/M
+0016   0100             
+0017   0100 31 00 10    start:      LD   SP,1000h       ; establish local stack
+0018   0103 CD 37 01                CALL getTime        ; query the RTC
+0019   0106 21 A9 01                LD   HL,stTime 
+0020   0109 CD 78 01                CALL putStr         ; "The time is "
+0021   010C CD 15 01                CALL pTime24        ; print time in 24-hr format
+0022   010F CD 85 01                CALL crlf               
+0023   0112 C3 00 00    fin:        JP   0000           ; return to CP/M
+0024   0115             
+0025   0115             ; pTime24: print the time in 24-hour format
+0026   0115             ;
+0027   0115 3A A1 01    pTime24:    LD   A,(hour)
+0028   0118 CD 8F 01                CALL pBCD           ; print hours
+0029   011B 3E 3A                   LD   A,':'
+0030   011D CD 82 01                CALL putCh 
+0031   0120 3A A0 01                LD   A,(min) 
+0032   0123 CD 8F 01                CALL pBCD           ; print minutes
+0033   0126 3E 3A                   LD   A,':'
+0034   0128 CD 82 01                CALL putCh 
+0035   012B 3A 9F 01                LD   A,(sec) 
+0036   012E CD 8F 01                CALL pBCD           ; print seconds  
+0037   0131 C9                      RET 
+0038   0132             
+0039   0132             ; getRTC:
+0040   0132             ; encapsulates I/O port communication with RTC
+0041   0132             ; call with RTC parameter# in A
+0042   0132             ; returns with RTC value in A
+0043   0132             ;
+0044   0132 D3 41       getRTC:     OUT  (CLKCMD),A     ; send RTC command
+0045   0134 DB 42                   IN   A,(CLKDAT)     ; get RTC value
+0046   0136 C9                      RET 
+0047   0137             
+0048   0137             ; getTime:
+0049   0137             ; queries the RTC and saves time variables in memory as
+0050   0137             ; hour, min, sec, days, month, day, & year
+0051   0137             ;
+0052   0137 3E 00       getTime:    LD   A,0              
+0053   0139 CD 32 01                CALL getRTC         ; RTC 0 = seconds
+0054   013C 32 9F 01                LD   (sec),A        ; save seconds           
+0055   013F 3E 01                   LD   A,1
+0056   0141 CD 32 01                CALL getRTC         ; RTC 1 = minutes
+0057   0144 32 A0 01                LD   (min),A        ; save minutes                       
+0058   0147 3E 02                   LD   A,2
+0059   0149 CD 32 01                CALL getRTC         ; RTC 2 = hours
+0060   014C 32 A1 01                LD   (hour),A       ; save hours  
+0061   014F 3E 03                   LD   A,3 
+0062   0151 CD 32 01                CALL getRTC         ; RTC 3 = days/LSB
+0063   0154 32 A2 01                LD   (days),A       ; save days LSB        
+0064   0157 3E 04                   LD   A,4
+0065   0159 CD 32 01                CALL getRTC         ; RTC 4 = days/MSB
+0066   015C 32 A3 01                LD   (days+1),A     ; save days MSB   
+0067   015F 3E 05                   LD   A,5 
+0068   0161 CD 32 01                CALL getRTC         ; RTC 5 = day of month
+0069   0164 32 A4 01                LD   (day),A        ; save day   
+0070   0167 3E 06                   LD   A,6
+0071   0169 CD 32 01                CALL getRTC         ; RTC 6 = month 
+0072   016C 32 A5 01                LD   (mon),A        ; save month 
+0073   016F 3E 07                   LD   A,7 
+0074   0171 CD 32 01                CALL getRTC         ; RTC 7 = year 
+0075   0174 32 A6 01                LD   (year),A       ; save year
+0076   0177 C9                      RET         
+0077   0178             
+0078   0178             
+0079   0178             ; write a null-terminated ASCII string, pointed to by HL, 
+0080   0178             ; to the console
+0081   0178             ;
+0082   0178 7E          putStr:     LD      A,(HL)      ; load next char in string      
+0083   0179 B7                      OR      A           ; is it end-of-string NULL?
+0084   017A C8                      RET     Z           ; if so, we are done
+0085   017B CD 82 01                CALL    putCh       ; send char to output device
+0086   017E 23                      INC     HL          ; point to next character in string
+0087   017F C3 78 01                JP      putStr      ; and loop until done
+0088   0182             
+0089   0182             
+0090   0182             ; send a character to console.
+0091   0182             ; really one should check TxRdy status bit before sending.
+0092   0182             ;
+0093   0182 D3 02       putCh:      OUT  (2),A          ; send char to output devices
+0094   0184 C9                      RET
+0095   0185             
+0096   0185             
+0097   0185             ; crlf issues a two byte carriage return/line feed combo to output devices
+0098   0185             ; 
+0099   0185 3E 0D       crlf:       LD   A,0DH
+0100   0187 CD 82 01                CALL putCh          ; output CR
+0101   018A 3E 0A                   LD   A,0AH
+0102   018C C3 82 01                JP   putCh          ; output LF        
+0103   018F             
+0104   018F             
+0105   018F             ; pBCD prints the BCD byte in A as a two-digit value
+0106   018F             ; for example, value 38h is printed as two ASCII characters "38"
+0107   018F             ;
+0108   018F F5          pBCD:       PUSH AF             ; save value
+0109   0190 0F                      RRCA                ; rotate first digit into lower 4 bits
+0110   0191 0F                      RRCA    
+0111   0192 0F                      RRCA    
+0112   0193 0F                      RRCA    
+0113   0194 CD 98 01                CALL j07            ; convert first digit to ASCII
+0114   0197 F1                      POP  AF             ; restore value & continue with 2nd digit
+0115   0198 E6 0F       j07:        AND  0FH            ; consider only lower 4 bits
+0116   019A C6 30                   ADD  A,30H          ; convert value to ASCII  
+0117   019C C3 82 01                JP   putCh          ; output ASCII character
+0118   019F             
+0119   019F             
+0120   019F 00          sec:        .db 00
+0121   01A0 00          min:        .db 00    
+0122   01A1 00          hour:       .db 00
+0123   01A2 00 00       days:       .dw 0000
+0124   01A4 00          day:        .db 00
+0125   01A5 00          mon:        .db 00
+0126   01A6 00 00       year:       .dw 0000
+0127   01A8 00          dow:        .db 00
+0128   01A9 54 68 65 20 stTime:     .db "The current time is ",0
+0128   01AD 63 75 72 72 
+0128   01B1 65 6E 74 20 
+0128   01B5 74 69 6D 65 
+0128   01B9 20 69 73 20 
+0128   01BD 00 
+0129   01BE             
+0130   01BE             .END tasm: Number of errors = 0

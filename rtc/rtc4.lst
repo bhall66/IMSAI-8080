@@ -1,0 +1,315 @@
+0001   0000             ;
+0002   0000             ;   Title:   rtc4.asm
+0003   0000             ;  Author:   Bruce E. Hall, w8bh
+0004   0000             ;    Date:   10 Aug 2025
+0005   0000             ;      HW:   IMSAI8080 emulator by TheHighNibble
+0006   0000             ;      SW:   TASM compiler using Z80 mnemonics (-80 option)
+0007   0000             ;            
+0008   0000             ;   Descr:   Real Time Clock (RTC) Tutorial
+0009   0000             ;            Learn how to read the system time & date under CP/M 2.2
+0010   0000             ;
+0011   0000             
+0012   0000             CLKCMD      .EQU    41h         ; RTC command port
+0013   0000             CLKDAT      .EQU    42h         ; RTC data port
+0014   0000             
+0015   0100                         .ORG    100h        ; Run under CP/M
+0016   0100             
+0017   0100 31 00 10    start:      LD   SP,1000h       ; establish local stack
+0018   0103                     
+0019   0103 CD D2 01                CALL getTime        ; hour/min/sec/days
+0020   0106             
+0021   0106                         ; days = day+1 since 1/1/1978, so that
+0022   0106                         ; 1/2/1978 = 2 days, etc.
+0023   0106                         ;    
+0024   0106                         ; The 'days' value must be broken down into
+0025   0106                         ; years, months and days in order to determine
+0026   0106                         ; the current date.  The year is calculated first,
+0027   0106                         ; then the month, and finally the day              
+0028   0106             
+0029   0106                         ; Now calculate the year 
+0030   0106                         ; when finished, DE = current year
+0031   0106                         ; and HL = day within current year
+0032   0106                         ;
+0033   0106 2A 61 02                LD   HL,(days)      ; get days into HL 
+0034   0109 11 B9 07                LD   DE,1977        ; start year 1978 (incr below)        
+0035   010C 13          j02:        INC  DE             ; go to the next year
+0036   010D 01 6D 01                LD   BC,365         ; normal year = 365 days
+0037   0110 7B                      LD   A,E            ; test the current year
+0038   0111 E6 03                   AND  03h            ; is it a leap year? 
+0039   0113 C2 17 01                JP   NZ,j01         ; no
+0040   0116 03                      INC  BC             ; yes, so year has 366 days
+0041   0117 ED 42       j01:        SBC  HL,BC          ; subtract days from total
+0042   0119 CA 1F 01                JP   Z,j03          ; loop until 0
+0043   011C D2 0C 01                JP   NC,j02         ; or until negative (too far)
+0044   011F 09          j03:        ADD  HL,BC          ; add back days in year
+0045   0120 ED 53 63 02             LD   (year),DE      ; save year
+0046   0124 22 65 02                LD   (doy),HL       ; save day of year
+0047   0127             
+0048   0127                         ; To prepare for determining the month, we must
+0049   0127                         ; first determine the # of days in Febrary
+0050   0127                         ; if its a leap year, feb has 29 days, etc
+0051   0127                         ;
+0052   0127 7B                      LD   A,E            ; test the current year
+0053   0128 E6 03                   AND  03h            ; is it a leap year? 
+0054   012A 3E 1C                   LD   A,28           
+0055   012C C2 31 01                JP   NZ,j06         ; no, use normal daycount
+0056   012F 3E 1D                   LD   A,29           ; yes: adj feb for leap-yr
+0057   0131 32 6E 02    j06:        LD   (dim+1),A      ; store feb daycount
+0058   0134             
+0059   0134                         ; Now calculate the current month and day
+0060   0134                         ; by subtracting a month's worth of days
+0061   0134                         ; from the day-of-the-year value
+0062   0134                         ; until it is exhausted, then add back last month
+0063   0134                         ;
+0064   0134 11 6D 02                LD   DE,dim         ; point to days-in-month array
+0065   0137 AF                      XOR  A              ; reg A = month counter
+0066   0138 47                      LD   B,A            ; zero-out MSB of BC 
+0067   0139 3C          j04:        INC  A              ; increment month 
+0068   013A EB                      EX   DE,HL          ; now HL = pointer to month array
+0069   013B 4E                      LD   C,(HL)         ; BC = days-in-month
+0070   013C 23                      INC  HL             ; advance days-in-month pointer
+0071   013D EB                      EX   DE,HL          ; now HL = day of year 
+0072   013E ED 42                   SBC  HL,BC          ; try subtracting days in current month
+0073   0140 CA 46 01                JP   Z,j05          ; loop until 0
+0074   0143 D2 39 01                JP   NC,j04         ; or until negative (too far)
+0075   0146 09          j05:        ADD  HL,BC          ; add back days
+0076   0147 32 69 02                LD   (mon),A        ; save the month
+0077   014A 7D                      LD   A,L    
+0078   014B 32 68 02                LD   (day),A        ; save the day 
+0079   014E             
+0080   014E                         ; calculate day of week = days mod 7
+0081   014E                         ; too bad we don't have a modulo function!
+0082   014E                         ; so we will divide via serial subtraction
+0083   014E                         ; and use the remainder.  Quotient not needed.
+0084   014E                         ;
+0085   014E 2A 61 02                LD   HL,(days)      ; HL = days since 1/1/78
+0086   0151 2B                      DEC  HL             ; dont count current day
+0087   0152 11 07 00                LD   DE,7           ; divisor is 7
+0088   0155 AF                      XOR  A              ; clear carry for next op
+0089   0156 ED 52       j07:        SBC  HL,DE          ; subtract the divisor
+0090   0158 30 FC                   JR   NC,j07         ; keep subtracting until neg
+0091   015A 19                      ADD  HL,DE          ; undo last subtraction
+0092   015B 7D                      LD   A,L            ; remainder now in HL
+0093   015C 32 67 02                LD   (dow),A        ; store remainder
+0094   015F             
+0095   015F 21 7A 02                LD   HL,stTime 
+0096   0162 CD FB 01                CALL putStr         ; "The current time is..."
+0097   0165             
+0098   0165                         ; print current local time in AM/PM format
+0099   0165                         ; 
+0100   0165 21 AB 02                LD   HL,stAM        ; assume AM for now
+0101   0168 3A 6A 02                LD   A,(hour)       ; get the hour (in BCD)
+0102   016B FE 12                   CP   12h            ; hour < 12?
+0103   016D DA 79 01                JP   C,j08          ; yes, keep hour as AM
+0104   0170 CA 76 01                JP   Z,j09          ; if 12PM, don't change hour
+0105   0173 D6 12                   SUB  12h            ; if hour is 13+, subtract 12
+0106   0175 27                      DAA                 ; adjust result for BCD
+0107   0176 21 B1 02    j09:        LD   HL,stPM        ; use PM, not AM
+0108   0179 E5          j08:        PUSH HL             ; save AM/PM pointer
+0109   017A CD 12 02                CALL pBCD           ; print hours in 12hr format
+0110   017D 3E 3A                   LD   A,':'
+0111   017F CD 05 02                CALL putCh 
+0112   0182 3A 6B 02                LD   A,(min) 
+0113   0185 CD 12 02                CALL pBCD           ; print minutes
+0114   0188 3E 3A                   LD   A,':'
+0115   018A CD 05 02                CALL putCh 
+0116   018D 3A 6C 02                LD   A,(sec) 
+0117   0190 CD 12 02                CALL pBCD           ; print seconds  
+0118   0193 E1                      POP  HL 
+0119   0194 CD FB 01                CALL putStr         ; print AM or PM 
+0120   0197             
+0121   0197                         ; print the day of the week
+0122   0197                         ;
+0123   0197 3A 67 02                LD   A,(dow)        ; A = day of week
+0124   019A 07                      RLCA                ; A x 2 
+0125   019B 07                      RLCA                ; A x 4
+0126   019C 06 00                   LD   B,0 
+0127   019E 4F                      LD   C,A            ; offset BC = dow x 4
+0128   019F 21 8F 02                LD   HL,stDow       ; point to days of week
+0129   01A2 09                      ADD  HL,BC          ; add in offset
+0130   01A3 CD FB 01                CALL putStr         ; print day of week
+0131   01A6 3E 20                   LD   A,' '
+0132   01A8 CD 05 02                CALL putCh          ; followed by space
+0133   01AB             
+0134   01AB                         ; print the date as month/day/year
+0135   01AB                         ;
+0136   01AB 3A 69 02                LD   A,(mon)
+0137   01AE CD 22 02                CALL printNum       ; print month
+0138   01B1 3E 2F                   LD   A,'/'
+0139   01B3 CD 05 02                CALL putCh
+0140   01B6 3A 68 02                LD   A,(day) 
+0141   01B9 CD 22 02                CALL printNum       ; print day 
+0142   01BC 3E 2F                   LD   A,'/'
+0143   01BE CD 05 02                CALL putCh 
+0144   01C1 2A 63 02                LD   HL,(year) 
+0145   01C4 CD 2B 02                CALL printNum16     ; print year 
+0146   01C7 CD 08 02                CALL crlf            
+0147   01CA             
+0148   01CA C3 00 00    fin:        JP   0000           ; return to CP/M
+0149   01CD             
+0150   01CD             ; getRTC:
+0151   01CD             ; call with RTC parameter# in A
+0152   01CD             ; returns with RTC value in A
+0153   01CD             ;
+0154   01CD D3 41       getRTC:     OUT  (CLKCMD),A     ; send RTC command
+0155   01CF DB 42                   IN   A,(CLKDAT)     ; get RTC value
+0156   01D1 C9                      RET 
+0157   01D2             
+0158   01D2             ; getTime:
+0159   01D2             ; queries the RTC and saves time variables in memory as
+0160   01D2             ; hour, min, sec, and days
+0161   01D2             ;
+0162   01D2 3E 00       getTime:    LD   A,0               
+0163   01D4 CD CD 01                CALL getRTC         ; RTC 0 = seconds
+0164   01D7 32 6C 02                LD   (sec),A        ; save seconds           
+0165   01DA 3E 01                   LD   A,1
+0166   01DC CD CD 01                CALL getRTC         ; RTC 1 = minutes
+0167   01DF 32 6B 02                LD   (min),A        ; save minutes                       
+0168   01E2 3E 02                   LD   A,2
+0169   01E4 CD CD 01                CALL getRTC         ; RTC 2 = hours
+0170   01E7 32 6A 02                LD   (hour),A       ; save hours  
+0171   01EA 3E 03                   LD   A,3 
+0172   01EC CD CD 01                CALL getRTC         ; RTC 3 = days/LSB
+0173   01EF 32 61 02                LD   (days),A       ; save days LSB        
+0174   01F2 3E 04                   LD   A,4
+0175   01F4 CD CD 01                CALL getRTC         ; RTC 4 = days/MSB
+0176   01F7 32 62 02                LD   (days+1),A     ; save days MSB      
+0177   01FA C9                      RET         
+0178   01FB             
+0179   01FB             ; write a null-terminated ASCII string, pointed to by HL, 
+0180   01FB             ; to the console
+0181   01FB             ;
+0182   01FB 7E          putStr:     LD      A,(HL)      ; load next char in string      
+0183   01FC B7                      OR      A           ; is it end-of-string NULL?
+0184   01FD C8                      RET     Z           ; if so, we are done
+0185   01FE CD 05 02                CALL    putCh       ; send char to output device
+0186   0201 23                      INC     HL          ; point to next character in string
+0187   0202 C3 FB 01                JP      putStr      ; and loop until done
+0188   0205             
+0189   0205             
+0190   0205             ; send a character to console.
+0191   0205             ; really one should check TxRdy status bit before sending.
+0192   0205             ;
+0193   0205 D3 02       putCh:      OUT  (2),A          ; send char to output devices
+0194   0207 C9                      RET
+0195   0208             
+0196   0208             
+0197   0208             ; crlf issues a two byte carriage return/line feed combo to output devices
+0198   0208             ; 
+0199   0208 3E 0D       crlf:       LD   A,0DH
+0200   020A CD 05 02                CALL putCh          ; output CR
+0201   020D 3E 0A                   LD   A,0AH
+0202   020F C3 05 02                JP   putCh          ; output LF        
+0203   0212             
+0204   0212             
+0205   0212             ; pBCD prints the BCD byte in A as a two-digit value
+0206   0212             ; for example, value 38h is printed as two ASCII characters "38"
+0207   0212             ;
+0208   0212 F5          pBCD:       PUSH AF             ; save value
+0209   0213 0F                      RRCA                ; rotate first digit into lower 4 bits
+0210   0214 0F                      RRCA    
+0211   0215 0F                      RRCA    
+0212   0216 0F                      RRCA    
+0213   0217 CD 1B 02                CALL jBC            ; convert first digit to ASCII
+0214   021A F1                      POP  AF             ; restore value & continue with 2nd digit
+0215   021B E6 0F       jBC:        AND  0FH            ; consider only lower 4 bits
+0216   021D C6 30                   ADD  A,30H          ; convert value to ASCII  
+0217   021F C3 05 02                JP   putCh          ; output ASCII character
+0218   0222             
+0219   0222             ;=====================================================
+0220   0222             ; printNum - prints value of Reg A as a decimal number
+0221   0222             ;            leading zeroes are suppressed
+0222   0222             ;
+0223   0222             ; On Entry:
+0224   0222             ;   A contains value to be printed (0-255)
+0225   0222             ;
+0226   0222             ; On Exit:
+0227   0222             ;   A is zeroed.
+0228   0222             ;   BC, DE, HL preserved.
+0229   0222             ;
+0230   0222             printNum:
+0231   0222             printNum8:
+0232   0222 E5             PUSH HL              ; save HL
+0233   0223 6F             LD   L, A            ; copy A into HL
+0234   0224 AF             XOR  A 
+0235   0225 67             LD   H, A            
+0236   0226 CD 2B 02       CALL printNum16      ; print number
+0237   0229 E1             POP  HL              ; restore HL
+0238   022A C9             RET
+0239   022B             
+0240   022B             ;=====================================================
+0241   022B             ; printNum16 - prints value of Reg HL as a decimal 
+0242   022B             ;              number.  Leading zeroes are suppressed.
+0243   022B             ;
+0244   022B             ; On Entry:
+0245   022B             ;   HL contains value to be printed (0-65535)
+0246   022B             ;
+0247   022B             ; On Exit:
+0248   022B             ;   BC, DE preserved.
+0249   022B             ;
+0250   022B             printNum16:
+0251   022B C5             PUSH BC              ; save BC, DE
+0252   022C D5             PUSH DE
+0253   022D 16 00          LD   D, 0            ; leading zero flag
+0254   022F 01 F0 D8       LD	BC,-10000       ; count 10000's
+0255   0232 CD 4D 02       CALL pn1             ; print the digit, if any
+0256   0235 01 18 FC       LD	BC,-1000        ; count 1000's
+0257   0238 CD 4D 02       CALL pn1             ; print the digit, if any
+0258   023B 01 9C FF       LD	BC,-100         ; count 100's
+0259   023E CD 4D 02       CALL pn1             ; print the digit, if any
+0260   0241 0E F6          LD   C, -10          ; count tens
+0261   0243 CD 4D 02       CALL pn1             ; print the digit, if any
+0262   0246 48             LD   C, B            ; count ones
+0263   0247 CD 4D 02       CALL pn1             ; print the digit
+0264   024A D1             POP  DE           
+0265   024B C1             POP  BC              ; restore BC, DE
+0266   024C C9             RET
+0267   024D             
+0268   024D             pn1:	
+0269   024D 3E 2F          LD   A,'0'-1         ; A contains digit in ASCII
+0270   024F             pn2:	
+0271   024F 3C             INC  A               ; update counter (in ASCII)  
+0272   0250 09             ADD  HL, BC          ; try adding another unit
+0273   0251 38 FC          JR   C, pn2          ; no carry yet, so add again
+0274   0253 ED 42          SBC  HL, BC          ; went to far, so back up 1 unit
+0275   0255 FE 30          CP   '0'             ; is digit 0?
+0276   0257 20 03          JR   NZ, pn3         ; no, so print it right away
+0277   0259 CB 22          SLA  D               ; check for leading zeroes      
+0278   025B C8             RET  Z               ; don't print a leading 0
+0279   025C             pn3:
+0280   025C 14             INC  D               ; no more leading zeros
+0281   025D CD 05 02       CALL putCh           ; print character
+0282   0260 C9             RET
+0283   0261             
+0284   0261 00 00       days:       .dw 0000  
+0285   0263 00 00       year:       .dw 0000
+0286   0265 00 00       doy:        .dw 0000
+0287   0267 00          dow:        .db 00
+0288   0268 00          day:        .db 00
+0289   0269 00          mon:        .db 00
+0290   026A 00          hour:       .db 00
+0291   026B 00          min:        .db 00 
+0292   026C 00          sec:        .db 00 
+0293   026D 1F 1C 1F 1E dim:        .db 31,28,31,30,31,30,31,31,30,31,30,31,0
+0293   0271 1F 1E 1F 1F 
+0293   0275 1E 1F 1E 1F 
+0293   0279 00 
+0294   027A 54 68 65 20 stTime:     .db "The current time is ",0
+0294   027E 63 75 72 72 
+0294   0282 65 6E 74 20 
+0294   0286 74 69 6D 65 
+0294   028A 20 69 73 20 
+0294   028E 00 
+0295   028F 53 75 6E 00 stDow:      .db "Sun",0,"Mon",0,"Tue",0,"Wed",0,"Thu",0,"Fri",0,"Sat",0 
+0295   0293 4D 6F 6E 00 
+0295   0297 54 75 65 00 
+0295   029B 57 65 64 00 
+0295   029F 54 68 75 00 
+0295   02A3 46 72 69 00 
+0295   02A7 53 61 74 00 
+0296   02AB 20 41 4D 2C stAM:       .db " AM, ",0
+0296   02AF 20 00 
+0297   02B1 20 50 4D 2C stPM:       .db " PM, ",0
+0297   02B5 20 00 
+0298   02B7             
+0299   02B7             .END tasm: Number of errors = 0

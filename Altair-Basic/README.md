@@ -20,7 +20,7 @@ Copyright 1975, Bill Gates, Paul Allen, Monte Davidoff
 
 
 
-See http://w8bh.net/AltairBasic.pdf for more information.
+See http://w8bh.net/AltairBASIC.pdf for more information.
 
 
 

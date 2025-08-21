@@ -8,27 +8,21 @@ Copyright 1975, Bill Gates, Paul Allen, Monte Davidoff
 
 
 
+"BASIC.asm" is the an annotated disassembly of the 4K version Altair BASIC 3.2.  It builds on the disassembly provided by Charles Mangin on his GitHub site and on Reuben Harris' excellent descriptions at altairbasic.org. 
+
+
+
 "basic-rom.hex" is a rom image file for running Altair Basic on an emulated IMSAI 8080 by TheHighNibble.
 
 
 
-Install it in the ROMS folder of your IMSAI 8080's microSD card, then create a memory map in system.conf like this:
-
-
-
-MEMORY 5
-
-ram         0,256
-
-rom         0xd8,16,basic-rom.hex
-
-boot        0xd800
-
-
-
-Set your NVS configuration to 8558, 0558, 0D58, or something similar.
-
-
-
 "basic-tape.hex" is a paper tape file.  Load it via monitor/paper tape reader and run it at address 0000.
+
+
+
+See http://w8bh.net/AltairBasic.pdf for more information.
+
+
+
+
 

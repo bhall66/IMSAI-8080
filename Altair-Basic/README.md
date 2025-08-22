@@ -8,7 +8,7 @@ Copyright 1975, Bill Gates, Paul Allen, Monte Davidoff
 
 
 
-"BASIC.asm" is the an annotated disassembly of the 4K version Altair BASIC 3.2.  It builds on the disassembly provided by Charles Mangin on his GitHub site and on Reuben Harris' excellent descriptions at altairbasic.org. 
+"BASIC.asm" is an annotated disassembly of the 4K version Altair BASIC 3.2.  It builds on the disassembly provided by Charles Mangin on his GitHub site and on Reuben Harris' excellent descriptions at altairbasic.org. 
 
 
 
